@@ -4,7 +4,9 @@
  */
 
 const http = require('http');
-const { MongoClient } = require('mongodb');
+const net = require('net');
+const fs = require('fs');
+const path = require('path');
 
 console.log('=== 德州扑克游戏 - 系统检查 ===\n');
 
@@ -35,29 +37,33 @@ function checkBackend() {
   });
 }
 
-// 检查 MongoDB
+// 检查 MongoDB（通过端口检查）
 function checkMongoDB() {
   return new Promise((resolve) => {
-    const client = new MongoClient('mongodb://localhost:27017', {
-      serverSelectionTimeoutMS: 2000
+    const socket = new net.Socket();
+
+    socket.setTimeout(2000);
+
+    socket.on('connect', () => {
+      socket.destroy();
+      resolve({ ok: true, message: 'MongoDB 运行正常' });
     });
 
-    client.connect()
-      .then(() => {
-        client.close();
-        resolve({ ok: true, message: 'MongoDB 运行正常' });
-      })
-      .catch(() => {
-        resolve({ ok: false, message: 'MongoDB 未启动或无法连接' });
-      });
+    socket.on('timeout', () => {
+      socket.destroy();
+      resolve({ ok: false, message: 'MongoDB 未启动或无法连接' });
+    });
+
+    socket.on('error', () => {
+      resolve({ ok: false, message: 'MongoDB 未启动或无法连接' });
+    });
+
+    socket.connect(27017, 'localhost');
   });
 }
 
 // 检查依赖
 function checkDependencies() {
-  const fs = require('fs');
-  const path = require('path');
-
   const checks = [];
 
   // 检查后端依赖
