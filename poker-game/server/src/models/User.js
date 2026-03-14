@@ -67,27 +67,39 @@ const User = mongoose.model('User', userSchema);
 
 // 内存存储模型（开发模式）
 class MemoryUser {
+  constructor(data = {}) {
+    Object.assign(this, data);
+  }
+
   static async findOne(query) {
+    let user = null;
+
     if (query._id) {
-      return memoryStorage.users.find(u => u._id === query._id);
+      user = memoryStorage.users.find(u => u._id === query._id);
     }
     if (query.email) {
-      return memoryStorage.users.find(u => u.email === query.email);
+      user = memoryStorage.users.find(u => u.email === query.email);
     }
     if (query.username) {
-      return memoryStorage.users.find(u => u.username === query.username);
+      user = memoryStorage.users.find(u => u.username === query.username);
     }
     if (query.$or) {
       for (const condition of query.$or) {
         const found = await this.findOne(condition);
-        if (found) return found;
+        if (found) {
+          user = found;
+          break;
+        }
       }
     }
-    return null;
+
+    // 返回一个 MemoryUser 实例，而不是普通对象
+    return user ? new MemoryUser(user) : null;
   }
 
   static async findById(id) {
-    return memoryStorage.users.find(u => u._id === id);
+    const user = memoryStorage.users.find(u => u._id === id);
+    return user ? new MemoryUser(user) : null;
   }
 
   static async create(data) {
@@ -129,6 +141,11 @@ class MemoryUser {
   }
 
   save() {
+    // 在内存存储中找到并更新这个用户
+    const index = memoryStorage.users.findIndex(u => u._id === this._id);
+    if (index !== -1) {
+      memoryStorage.users[index] = { ...memoryStorage.users[index], ...this };
+    }
     return Promise.resolve(this);
   }
 }
