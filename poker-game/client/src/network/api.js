@@ -23,10 +23,22 @@ async function request(url, options = {}) {
     headers
   });
 
-  const data = await response.json();
+  // 获取响应文本
+  const text = await response.text();
+
+  // 如果响应为空，返回空对象
+  let data = {};
+  if (text && text.trim()) {
+    try {
+      data = JSON.parse(text);
+    } catch (e) {
+      console.error('JSON 解析失败:', text);
+      throw new Error('服务器响应格式错误');
+    }
+  }
 
   if (!response.ok) {
-    throw new Error(data.message || '请求失败');
+    throw new Error(data.message || `请求失败 (${response.status})`);
   }
 
   return data;

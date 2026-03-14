@@ -54,8 +54,23 @@ app.use((req, res) => {
 
 // 错误处理
 app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).json({ message: '服务器内部错误' });
+  console.error('服务器错误:', err.stack);
+
+  // 确保始终返回 JSON
+  res.status(err.status || 500).json({
+    success: false,
+    message: err.message || '服务器内部错误',
+    ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
+  });
+});
+
+// 捕获未处理的 Promise 拒绝
+process.on('unhandledRejection', (err) => {
+  console.error('未处理的 Promise 拒绝:', err);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('未捕获的异常:', err);
 });
 
 module.exports = { app, server };

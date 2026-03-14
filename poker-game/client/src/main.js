@@ -96,7 +96,23 @@ function showAuthPage() {
   const app = document.getElementById('app');
   const template = document.getElementById('auth-template');
   app.innerHTML = template.innerHTML;
+
+  // 检查服务器状态
+  checkServerConnection();
   setupAuthHandlers();
+}
+
+/**
+ * 检查服务器连接
+ */
+async function checkServerConnection() {
+  const { displayServerStatus } = await import('./utils/serverStatus.js');
+  const isOnline = await displayServerStatus();
+
+  // 每30秒检查一次
+  setInterval(async () => {
+    await displayServerStatus();
+  }, 30000);
 }
 
 /**
@@ -187,12 +203,16 @@ function setupAuthHandlers() {
     const password = loginForm.password.value;
     const errorEl = document.getElementById('login-error');
 
+    errorEl.textContent = '登录中...';
+
     try {
       await auth.login(email, password);
       socketClient.connect();
       showMainPage();
     } catch (error) {
-      errorEl.textContent = error.message;
+      console.error('登录错误:', error);
+      errorEl.textContent = '登录失败: ' + error.message;
+      errorEl.style.color = '#e74c3c';
     }
   });
 
@@ -205,12 +225,16 @@ function setupAuthHandlers() {
     const initialChips = parseInt(registerForm.initialChips.value);
     const errorEl = document.getElementById('register-error');
 
+    errorEl.textContent = '注册中...';
+
     try {
       await auth.register(username, email, password, initialChips);
       socketClient.connect();
       showMainPage();
     } catch (error) {
-      errorEl.textContent = error.message;
+      console.error('注册错误:', error);
+      errorEl.textContent = '注册失败: ' + error.message;
+      errorEl.style.color = '#e74c3c';
     }
   });
 }
