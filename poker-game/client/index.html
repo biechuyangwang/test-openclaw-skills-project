@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>德州扑克 - Texas Hold'em Poker</title>
+  <link rel="stylesheet" href="/src/styles/main.css">
+</head>
+<body>
+  <div id="app"></div>
+
+  <!-- 登录/注册页面 -->
+  <template id="auth-template">
+    <div class="auth-container">
+      <div class="auth-box">
+        <h1 class="auth-title">德州扑克</h1>
+        <div class="auth-tabs">
+          <button class="auth-tab active" data-tab="login">登录</button>
+          <button class="auth-tab" data-tab="register">注册</button>
+        </div>
+
+        <!-- 登录表单 -->
+        <form id="login-form" class="auth-form active">
+          <div class="form-group">
+            <label for="login-email">邮箱</label>
+            <input type="email" id="login-email" name="email" required>
+          </div>
+          <div class="form-group">
+            <label for="login-password">密码</label>
+            <input type="password" id="login-password" name="password" required>
+          </div>
+          <button type="submit" class="btn btn-primary">登录</button>
+          <p class="auth-error" id="login-error"></p>
+        </form>
+
+        <!-- 注册表单 -->
+        <form id="register-form" class="auth-form">
+          <div class="form-group">
+            <label for="register-username">用户名</label>
+            <input type="text" id="register-username" name="username" required minlength="3">
+          </div>
+          <div class="form-group">
+            <label for="register-email">邮箱</label>
+            <input type="email" id="register-email" name="email" required>
+          </div>
+          <div class="form-group">
+            <label for="register-password">密码</label>
+            <input type="password" id="register-password" name="password" required minlength="6">
+          </div>
+          <div class="form-group">
+            <label for="register-chips">初始筹码</label>
+            <select id="register-chips" name="initialChips">
+              <option value="1000">1,000</option>
+              <option value="5000" selected>5,000</option>
+              <option value="10000">10,000</option>
+            </select>
+          </div>
+          <button type="submit" class="btn btn-primary">注册</button>
+          <p class="auth-error" id="register-error"></p>
+        </form>
+      </div>
+    </div>
+  </template>
+
+  <!-- 主页面 -->
+  <template id="main-template">
+    <header class="header">
+      <div class="header-content">
+        <h1 class="logo">德州扑克</h1>
+        <div class="user-info">
+          <span class="user-name" id="user-name"></span>
+          <span class="user-chips" id="user-chips"></span>
+          <button class="btn btn-secondary" id="logout-btn">退出</button>
+        </div>
+      </div>
+    </header>
+
+    <nav class="nav">
+      <button class="nav-btn active" data-page="lobby">游戏大厅</button>
+      <button class="nav-btn" data-page="single-player">单机游戏</button>
+      <button class="nav-btn" data-page="profile">个人资料</button>
+    </nav>
+
+    <main class="main-content">
+      <!-- 游戏大厅 -->
+      <section id="lobby-page" class="page active">
+        <h2>游戏大厅</h2>
+        <div class="lobby-actions">
+          <button class="btn btn-primary" id="create-room-btn">创建房间</button>
+          <button class="btn btn-success" id="quick-match-btn">快速匹配</button>
+        </div>
+        <div class="room-list" id="room-list">
+          <!-- 房间列表将在这里动态生成 -->
+        </div>
+      </section>
+
+      <!-- 单机游戏 -->
+      <section id="single-player-page" class="page">
+        <h2>单机游戏</h2>
+        <div class="game-setup">
+          <div class="form-group">
+            <label for="ai-count">AI 对手数量</label>
+            <select id="ai-count">
+              <option value="1">1 个对手</option>
+              <option value="2" selected>2 个对手</option>
+              <option value="3">3 个对手</option>
+              <option value="4">4 个对手</option>
+              <option value="5">5 个对手</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="ai-difficulty">AI 难度</label>
+            <select id="ai-difficulty">
+              <option value="easy">简单</option>
+              <option value="medium" selected>中等</option>
+              <option value="hard">困难</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="small-blind">小盲注</label>
+            <input type="number" id="small-blind" value="10" min="1">
+          </div>
+          <button class="btn btn-primary" id="start-single-player-btn">开始游戏</button>
+        </div>
+      </section>
+
+      <!-- 个人资料 -->
+      <section id="profile-page" class="page">
+        <h2>个人资料</h2>
+        <div class="profile-content">
+          <div class="profile-avatar">
+            <img id="profile-avatar-img" src="/assets/default-avatar.png" alt="头像">
+            <button class="btn btn-secondary">更换头像</button>
+          </div>
+          <div class="profile-info">
+            <div class="form-group">
+              <label>用户名</label>
+              <input type="text" id="profile-username">
+            </div>
+            <div class="form-group">
+              <label>邮箱</label>
+              <input type="email" id="profile-email" disabled>
+            </div>
+            <div class="stats">
+              <h3>统计数据</h3>
+              <div class="stat-item">
+                <span class="stat-label">总局数</span>
+                <span class="stat-value" id="stat-games-played">0</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">获胜局数</span>
+                <span class="stat-value" id="stat-games-won">0</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">胜率</span>
+                <span class="stat-value" id="stat-win-rate">0%</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">总收益</span>
+                <span class="stat-value" id="stat-earnings">0</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </template>
+
+  <!-- 游戏桌面 -->
+  <template id="game-table-template">
+    <div class="game-table-container">
+      <div class="game-header">
+        <button class="btn btn-secondary" id="leave-game-btn">离开游戏</button>
+        <div class="game-info">
+          <span class="pot-info">底池: <span id="pot-amount">0</span></span>
+          <span class="phase-info" id="game-phase">翻牌前</span>
+        </div>
+      </div>
+
+      <div class="poker-table">
+        <!-- 公共牌 -->
+        <div class="community-cards" id="community-cards">
+          <!-- 公共牌将在这里动态生成 -->
+        </div>
+
+        <!-- 玩家座位 -->
+        <div class="seats" id="player-seats">
+          <!-- 玩家座位将在这里动态生成 -->
+        </div>
+      </div>
+
+      <!-- 操作按钮 -->
+      <div class="player-controls" id="player-controls">
+        <button class="btn btn-danger" id="fold-btn">弃牌</button>
+        <button class="btn btn-warning" id="check-btn">过牌</button>
+        <button class="btn btn-info" id="call-btn">跟注</button>
+        <button class="btn btn-success" id="raise-btn">加注</button>
+        <button class="btn btn-primary" id="allin-btn">全下</button>
+      </div>
+
+      <!-- 加注滑块 -->
+      <div class="raise-slider" id="raise-slider" style="display: none;">
+        <input type="range" id="raise-amount" min="0" max="1000" value="0">
+        <span id="raise-value">0</span>
+        <button class="btn btn-success" id="confirm-raise-btn">确认加注</button>
+        <button class="btn btn-secondary" id="cancel-raise-btn">取消</button>
+      </div>
+    </div>
+  </template>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
