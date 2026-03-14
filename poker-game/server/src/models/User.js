@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { memoryStorage } = require('../config/database');
 
 const userSchema = new mongoose.Schema({
   username: {
@@ -61,4 +62,83 @@ const userSchema = new mongoose.Schema({
   }
 });
 
-module.exports = mongoose.model('User', userSchema);
+// MongoDB 模型
+const User = mongoose.model('User', userSchema);
+
+// 内存存储模型（开发模式）
+class MemoryUser {
+  static async findOne(query) {
+    if (query._id) {
+      return memoryStorage.users.find(u => u._id === query._id);
+    }
+    if (query.email) {
+      return memoryStorage.users.find(u => u.email === query.email);
+    }
+    if (query.username) {
+      return memoryStorage.users.find(u => u.username === query.username);
+    }
+    if (query.$or) {
+      for (const condition of query.$or) {
+        const found = await this.findOne(condition);
+        if (found) return found;
+      }
+    }
+    return null;
+  }
+
+  static async findById(id) {
+    return memoryStorage.users.find(u => u._id === id);
+  }
+
+  static async create(data) {
+    const newUser = {
+      _id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+      ...data,
+      createdAt: new Date(),
+      lastLogin: new Date()
+    };
+    memoryStorage.users.push(newUser);
+    return Promise.resolve(newUser);
+  }
+
+  static async find() {
+    return Promise.resolve(memoryStorage.users);
+  }
+
+  static async findOneAndUpdate(query, update, options = {}) {
+    const user = await this.findOne(query);
+    if (!user) return null;
+
+    Object.assign(user, update);
+    return user;
+  }
+
+  static async findByIdAndUpdate(id, update, options = {}) {
+    const user = await this.findById(id);
+    if (!user) return null;
+
+    Object.assign(user, update);
+    return user;
+  }
+
+  static async deleteOne(query) {
+    const index = memoryStorage.users.findIndex(u => u._id === query._id);
+    if (index !== -1) {
+      memoryStorage.users.splice(index, 1);
+    }
+  }
+
+  save() {
+    return Promise.resolve(this);
+  }
+}
+
+// 根据环境返回相应的模型
+const getModel = () => {
+  if (process.env.USE_MEMORY_DB === 'true') {
+    return MemoryUser;
+  }
+  return User;
+};
+
+module.exports = getModel();

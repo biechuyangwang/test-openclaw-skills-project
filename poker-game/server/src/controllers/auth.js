@@ -2,6 +2,13 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 
+// 辅助函数：安全地获取用户信息（移除密码）
+const sanitizeUser = (user) => {
+  if (!user) return null;
+  const { password, ...userWithoutPassword } = user;
+  return userWithoutPassword;
+};
+
 // 生成Token
 const generateToken = (id) => {
   return jwt.sign({ id }, process.env.JWT_SECRET, {
@@ -113,7 +120,11 @@ const login = async (req, res) => {
 // 获取当前用户信息
 const getMe = async (req, res) => {
   try {
-    const user = await User.findById(req.user.id).select('-password');
+    const user = await User.findById(req.user.id);
+    if (!user) {
+      return res.status(404).json({ message: '用户不存在' });
+    }
+
     res.json({
       success: true,
       user: {
