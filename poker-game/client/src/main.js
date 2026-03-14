@@ -11,7 +11,9 @@ const state = {
   game: null,
   socket: socketClient,
   roomManager: roomManager,
-  inMultiplayerGame: false
+  inMultiplayerGame: false,
+  inSinglePlayerGame: false,
+  myHoleCards: []
 };
 
 // 全局错误处理
@@ -328,8 +330,8 @@ function setupMainHandlers() {
   // 单机游戏开始按钮
   const startSinglePlayerBtn = document.getElementById('start-single-player-btn');
   if (startSinglePlayerBtn) {
-    startSinglePlayerBtn.addEventListener('click', () => {
-      alert('单机游戏功能开发中，敬请期待！');
+    startSinglePlayerBtn.addEventListener('click', async () => {
+      await startSinglePlayerGame();
     });
   }
 
@@ -470,7 +472,13 @@ function showGameTable() {
   const template = document.getElementById('game-table-template');
   app.innerHTML = template.innerHTML;
 
-  setupGameHandlers();
+  // 根据游戏模式设置不同的处理器
+  if (state.inSinglePlayerGame) {
+    setupSinglePlayerGameHandlers();
+  } else {
+    setupGameHandlers();
+  }
+
   renderGame();
 }
 
@@ -525,7 +533,9 @@ function setupGameHandlers() {
  * 玩家行动
  */
 function playerAction(action, amount = 0) {
-  if (state.inMultiplayerGame) {
+  if (state.inSinglePlayerGame) {
+    playerActionInSinglePlayer(action, amount);
+  } else if (state.inMultiplayerGame) {
     roomManager.playerAction(action, amount);
   }
 }
@@ -534,6 +544,12 @@ function playerAction(action, amount = 0) {
  * 渲染游戏
  */
 function renderGame() {
+  // 根据游戏模式选择渲染函数
+  if (state.inSinglePlayerGame) {
+    renderSinglePlayerGame();
+    return;
+  }
+
   if (!state.gameState) return;
 
   const gameState = state.gameState;
@@ -646,6 +662,326 @@ function updateControls(gameState) {
 function showRaiseSlider() {
   const slider = document.getElementById('raise-slider');
   slider.style.display = 'block';
+}
+
+/**
+ * 开始单机游戏
+ */
+async function startSinglePlayerGame() {
+  try {
+    // 动态导入游戏模块
+    const { Game } = await import('./game/Game.js');
+    const { Player } = await import('./game/Player.js');
+    const { AIPlayer } = await import('./ai/AIPlayer.js');
+
+    // 获取配置
+    const aiCount = parseInt(document.getElementById('ai-count').value);
+    const difficulty = document.getElementById('ai-difficulty').value;
+    const smallBlind = parseInt(document.getElementById('small-blind').value);
+
+    // 创建游戏
+    const game = new Game({
+      smallBlind,
+      bigBlind: smallBlind * 2
+    });
+
+    // 获取当前用户
+    const user = auth.getCurrentUser();
+
+    // 添加人类玩家
+    const humanPlayer = new Player(user.id, user.username, user.chips, false);
+    game.addPlayer(humanPlayer);
+
+    // 添加AI玩家
+    for (let i = 0; i < aiCount; i++) {
+      const ai = new AIPlayer(`AI-${i + 1}`, 5000, difficulty);
+      game.addPlayer(ai);
+    }
+
+    // 保存游戏状态
+    state.game = game;
+    state.inSinglePlayerGame = true;
+    state.myHoleCards = [];
+
+    // 显示游戏桌面
+    showGameTable();
+
+    // 开始游戏
+    try {
+      const result = game.startNewRound();
+      console.log('游戏开始:', result);
+
+      // 设置玩家底牌
+      const me = game.players.find(p => p.id === user.id);
+      if (me && me.holeCards) {
+        state.myHoleCards = me.holeCards.map(c => c.toJSON());
+      }
+
+      renderSinglePlayerGame();
+    } catch (error) {
+      console.error('游戏启动错误:', error);
+      alert('游戏启动失败: ' + error.message);
+      showMainPage();
+    }
+  } catch (error) {
+    console.error('加载游戏模块错误:', error);
+    alert('加载游戏失败: ' + error.message);
+  }
+}
+
+/**
+ * 渲染单机游戏
+ */
+function renderSinglePlayerGame() {
+  if (!state.game) return;
+
+  const gameState = state.game.getState();
+
+  // 更新阶段
+  const phaseEl = document.getElementById('game-phase');
+  if (phaseEl) {
+    const phaseNames = {
+      'preflop': '翻牌前',
+      'flop': '翻牌',
+      'turn': '转牌',
+      'river': '河牌',
+      'showdown': '摊牌'
+    };
+    phaseEl.textContent = phaseNames[gameState.phase] || gameState.phase;
+  }
+
+  // 更新底池
+  const potEl = document.getElementById('pot-amount');
+  if (potEl) potEl.textContent = gameState.pot.toLocaleString();
+
+  // 渲染公共牌
+  if (gameState.communityCards && gameState.communityCards.length > 0) {
+    renderCommunityCards(gameState.communityCards);
+  } else {
+    const container = document.getElementById('community-cards');
+    if (container) container.innerHTML = '';
+  }
+
+  // 渲染玩家座位
+  renderSinglePlayerSeats(gameState);
+
+  // 更新操作按钮
+  updateSinglePlayerControls(gameState);
+
+  // 如果当前是AI回合，自动执行AI操作
+  setTimeout(() => processAITurn(), 1000);
+}
+
+/**
+ * 渲染单机游戏玩家座位
+ */
+function renderSinglePlayerSeats(gameState) {
+  const container = document.getElementById('player-seats');
+  if (!container) return;
+
+  const positions = [
+    { top: '50%', left: '50%', transform: 'translate(-50%, -50%)' },
+    { top: '20%', left: '50%', transform: 'translate(-50%, -50%)' },
+    { top: '35%', left: '15%', transform: 'translate(-50%, -50%)' },
+    { top: '35%', left: '85%', transform: 'translate(-50%, -50%)' },
+    { top: '65%', left: '15%', transform: 'translate(-50%, -50%)' },
+    { top: '65%', left: '85%', transform: 'translate(-50%, -50%)' }
+  ];
+
+  const user = auth.getCurrentUser();
+
+  container.innerHTML = gameState.players.map((player, index) => {
+    const pos = positions[index % positions.length];
+    const isCurrentPlayer = index === gameState.currentPlayerIndex;
+    const isMe = player.id === user.id;
+
+    return `
+      <div class="seat ${isCurrentPlayer ? 'current-turn' : ''} ${player.active ? 'active' : ''}"
+           style="top: ${pos.top}; left: ${pos.left}; transform: ${pos.transform};">
+        <div class="seat-info">
+          <img class="seat-avatar" src="${player.avatar}" alt="头像">
+          <div>
+            <div class="seat-name">${player.name}</div>
+            <div class="seat-chips">${player.chips.toLocaleString()}</div>
+          </div>
+        </div>
+        <div class="seat-cards">
+          ${isMe && state.myHoleCards ? state.myHoleCards.map(card => `
+            <div class="card ${card.name.includes('♥') || card.name.includes('♦') ? 'red' : 'black'}">
+              ${card.name}
+            </div>
+          `).join('') : '<div class="card face-down">?</div><div class="card face-down">?</div>'}
+        </div>
+        ${player.bet > 0 ? `<div class="seat-action">下注: ${player.bet}</div>` : ''}
+        ${player.folded ? '<div class="seat-action">已弃牌</div>' : ''}
+        ${player.allIn ? '<div class="seat-action">全下</div>' : ''}
+      </div>
+    `;
+  }).join('');
+}
+
+/**
+ * 更新单机游戏操作按钮
+ */
+function updateSinglePlayerControls(gameState) {
+  const user = auth.getCurrentUser();
+  const currentPlayer = gameState.players[gameState.currentPlayerIndex];
+  const isMyTurn = currentPlayer && currentPlayer.id === user.id;
+
+  const buttons = document.querySelectorAll('.player-controls button:not(#confirm-raise-btn):not(#cancel-raise-btn)');
+  buttons.forEach(btn => {
+    btn.disabled = !isMyTurn;
+  });
+
+  // 根据当前状态显示/隐藏按钮
+  const checkBtn = document.getElementById('check-btn');
+  const callBtn = document.getElementById('call-btn');
+
+  if (gameState.currentBet === 0) {
+    if (checkBtn) checkBtn.style.display = 'inline-block';
+    if (callBtn) callBtn.style.display = 'none';
+  } else {
+    if (checkBtn) checkBtn.style.display = 'none';
+    if (callBtn) callBtn.style.display = 'inline-block';
+  }
+}
+
+/**
+ * 玩家行动（单机模式）
+ */
+function playerActionInSinglePlayer(action, amount = 0) {
+  if (!state.game || !state.inSinglePlayerGame) return;
+
+  const user = auth.getCurrentUser();
+  try {
+    const result = state.game.playerAction(user.id, action, amount);
+    console.log('玩家操作:', result);
+
+    // 处理阶段结束
+    if (result.phaseEnd) {
+      if (result.roundEnd) {
+        // 回合结束
+        if (result.winners) {
+          alert(`回合结束！赢家: ${result.winners.map(w => w.playerName).join(', ')}`);
+        }
+      } else {
+        // 进入下一阶段，发公共牌
+        if (result.communityCards) {
+          state.game.communityCards = result.communityCards;
+        }
+      }
+    }
+
+    renderSinglePlayerGame();
+  } catch (error) {
+    console.error('玩家操作错误:', error);
+    alert(error.message);
+  }
+}
+
+/**
+ * 处理AI回合
+ */
+function processAITurn() {
+  if (!state.game || !state.inSinglePlayerGame) return;
+
+  const currentPlayerIndex = state.game.currentPlayerIndex;
+  const currentPlayer = state.game.players[currentPlayerIndex];
+
+  // 如果不是AI或游戏结束，返回
+  if (!currentPlayer || !currentPlayer.isAI || !state.game.isRoundActive) {
+    return;
+  }
+
+  console.log('AI思考中:', currentPlayer.name);
+
+  // AI决策
+  setTimeout(() => {
+    try {
+      const action = currentPlayer.decide(state.game);
+      console.log('AI决策:', action);
+
+      const result = state.game.playerAction(currentPlayer.id, action.type, action.amount);
+      console.log('AI操作结果:', result);
+
+      // 检查是否回合结束
+      if (result.phaseEnd && result.roundEnd) {
+        if (result.winners) {
+          setTimeout(() => {
+            alert(`回合结束！赢家: ${result.winners.map(w => w.playerName).join(', ')}`);
+          }, 500);
+        }
+      }
+
+      renderSinglePlayerGame();
+
+      // 继续下一个AI
+      if (!result.roundEnd) {
+        setTimeout(() => processAITurn(), 1500);
+      }
+    } catch (error) {
+      console.error('AI操作错误:', error);
+    }
+  }, 1000);
+}
+
+/**
+ * 设置单机游戏处理器
+ */
+function setupSinglePlayerGameHandlers() {
+  // 玩家操作按钮
+  const foldBtn = document.getElementById('fold-btn');
+  const checkBtn = document.getElementById('check-btn');
+  const callBtn = document.getElementById('call-btn');
+  const raiseBtn = document.getElementById('raise-btn');
+  const allinBtn = document.getElementById('allin-btn');
+
+  foldBtn.addEventListener('click', () => playerActionInSinglePlayer('fold'));
+  checkBtn.addEventListener('click', () => playerActionInSinglePlayer('check'));
+  callBtn.addEventListener('click', () => playerActionInSinglePlayer('call'));
+
+  raiseBtn.addEventListener('click', () => {
+    const slider = document.getElementById('raise-slider');
+    const input = document.getElementById('raise-amount');
+    const user = auth.getCurrentUser();
+    const me = state.game.players.find(p => p.id === user.id);
+
+    if (me && state.game) {
+      const minRaise = state.game.currentBet * 2;
+      input.min = minRaise;
+      input.max = me.chips;
+      input.value = minRaise;
+      document.getElementById('raise-value').textContent = minRaise;
+    }
+    slider.style.display = 'block';
+  });
+
+  allinBtn.addEventListener('click', () => playerActionInSinglePlayer('all-in'));
+
+  // 加注确认
+  const confirmRaiseBtn = document.getElementById('confirm-raise-btn');
+  const cancelRaiseBtn = document.getElementById('cancel-raise-btn');
+
+  confirmRaiseBtn.addEventListener('click', () => {
+    const amount = parseInt(document.getElementById('raise-amount').value);
+    playerActionInSinglePlayer('raise', amount);
+    document.getElementById('raise-slider').style.display = 'none';
+  });
+
+  cancelRaiseBtn.addEventListener('click', () => {
+    document.getElementById('raise-slider').style.display = 'none';
+  });
+
+  // 离开游戏按钮
+  const leaveBtn = document.getElementById('leave-game-btn');
+  leaveBtn.addEventListener('click', () => {
+    if (confirm('确定要离开游戏吗？')) {
+      state.game = null;
+      state.inSinglePlayerGame = false;
+      state.myHoleCards = [];
+      showMainPage();
+    }
+  });
 }
 
 // 初始化应用
