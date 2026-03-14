@@ -706,9 +706,18 @@ async function startSinglePlayerGame() {
     const humanPlayer = new Player(user.id, user.username, user.chips, false);
     game.addPlayer(humanPlayer);
 
-    // 添加AI玩家
+    // 添加AI玩家（随机生成名字）
+    const aiNames = ['小龙', '阿强', '老王', '小李', '张三', '李四', '赵六', '钱七', '孙八', '周九'];
+    const usedNames = new Set([user.username]);
+
     for (let i = 0; i < aiCount; i++) {
-      const ai = new AIPlayer(`AI-${i + 1}`, 5000, difficulty);
+      let aiName;
+      do {
+        aiName = aiNames[Math.floor(Math.random() * aiNames.length)];
+      } while (usedNames.has(aiName));
+
+      usedNames.add(aiName);
+      const ai = new AIPlayer(aiName, 5000, difficulty);
       game.addPlayer(ai);
     }
 
@@ -809,24 +818,30 @@ function renderSinglePlayerSeats(gameState) {
     const isCurrentPlayer = index === gameState.currentPlayerIndex;
     const isMe = player.id === user.id;
 
+    // 处理头像 - 使用 data URI 作为默认头像
+    const avatar = player.avatar || '/assets/default-avatar.png';
+    const avatarUrl = avatar.startsWith('http') || avatar.startsWith('data:')
+      ? avatar
+      : `data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzNiIgaGVpZ2h0PSIzNiIgdmlld0JveD0iMCAwIDM2I+PGNpcmNsZSBjeD0iMTgiIGN5PSIxOCIgcj0iMTgiIGZpbGw9IiNmZmZmZmYiLz48L3N2Zz4`;
+
     return `
       <div class="seat ${isCurrentPlayer ? 'current-turn' : ''} ${player.active ? 'active' : ''}"
            style="top: ${pos.top}; left: ${pos.left}; transform: ${pos.transform};">
         <div class="seat-info">
-          <img class="seat-avatar" src="${player.avatar}" alt="头像">
+          <img class="seat-avatar" src="${avatarUrl}" alt="${player.name}">
           <div>
             <div class="seat-name">${player.name}</div>
             <div class="seat-chips">${player.chips.toLocaleString()}</div>
           </div>
         </div>
         <div class="seat-cards">
-          ${isMe && state.myHoleCards ? state.myHoleCards.map(card => `
+          ${isMe && state.myHoleCards && state.myHoleCards.length > 0 ? state.myHoleCards.map(card => `
             <div class="card ${card.name.includes('♥') || card.name.includes('♦') ? 'red' : 'black'}">
               ${card.name}
             </div>
           `).join('') : '<div class="card face-down">?</div><div class="card face-down">?</div>'}
         </div>
-        ${player.bet > 0 ? `<div class="seat-action">下注: ${player.bet}</div>` : ''}
+        ${player.currentRoundBet > 0 ? `<div class="seat-action">下注: ${player.currentRoundBet}</div>` : ''}
         ${player.folded ? '<div class="seat-action">已弃牌</div>' : ''}
         ${player.allIn ? '<div class="seat-action">全下</div>' : ''}
       </div>
