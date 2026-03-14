@@ -9,8 +9,8 @@ class Player {
     this.initialChips = chips;
     this.isAI = isAI;
     this.holeCards = [];
-    this.bet = 0;
-    this.currentRoundBet = 0;
+    this.totalBet = 0; // 总下注额
+    this.currentRoundBet = 0; // 本轮下注额
     this.folded = false;
     this.allIn = false;
     this.active = true; // 是否在游戏中
@@ -64,7 +64,7 @@ class Player {
   // 重置玩家状态（新一轮）
   resetForNewRound() {
     this.holeCards = [];
-    this.bet = 0;
+    this.totalBet = 0;
     this.currentRoundBet = 0;
     this.folded = false;
     this.allIn = false;
