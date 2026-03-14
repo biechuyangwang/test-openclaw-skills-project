@@ -185,7 +185,7 @@ class SocketService {
   /**
    * 处理玩家操作
    */
-  handlePlayerAction(socket, data) {
+  async handlePlayerAction(socket, data) {
     try {
       const { action, amount } = data;
       const roomId = this.playerRooms.get(socket.user.id);
