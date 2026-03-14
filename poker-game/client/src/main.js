@@ -13,8 +13,16 @@ const state = {
   roomManager: roomManager,
   inMultiplayerGame: false,
   inSinglePlayerGame: false,
-  myHoleCards: []
+  myHoleCards: [],
+  lastShowdownResults: null  // 保存摊牌结果
 };
+
+/**
+ * 检查两个ID是否相等（处理类型不一致）
+ */
+function isSameId(id1, id2) {
+  return String(id1) === String(id2);
+}
 
 // 全局错误处理
 window.addEventListener('error', (event) => {
@@ -603,12 +611,12 @@ function renderPlayerSeats(gameState) {
   if (!container) return;
 
   const positions = [
-    { top: '50%', left: '50%', transform: 'translate(-50%, -50%)' },
-    { top: '20%', left: '50%', transform: 'translate(-50%, -50%)' },
-    { top: '35%', left: '15%', transform: 'translate(-50%, -50%)' },
-    { top: '35%', left: '85%', transform: 'translate(-50%, -50%)' },
-    { top: '65%', left: '15%', transform: 'translate(-50%, -50%)' },
-    { top: '65%', left: '85%', transform: 'translate(-50%, -50%)' }
+    { top: '70%', left: '50%', transform: 'translate(-50%, -50%)' },  // 底部
+    { top: '20%', left: '50%', transform: 'translate(-50%, -50%)' },  // 顶部
+    { top: '30%', left: '12%', transform: 'translate(-50%, -50%)' },  // 左侧
+    { top: '30%', left: '88%', transform: 'translate(-50%, -50%)' },  // 右侧
+    { top: '70%', left: '12%', transform: 'translate(-50%, -50%)' },  // 左下
+    { top: '70%', left: '88%', transform: 'translate(-50%, -50%)' }   // 右下
   ];
 
   const user = auth.getCurrentUser();
@@ -706,18 +714,11 @@ async function startSinglePlayerGame() {
     const humanPlayer = new Player(user.id, user.username, user.chips, false);
     game.addPlayer(humanPlayer);
 
-    // 添加AI玩家（随机生成名字）
-    const aiNames = ['小龙', '阿强', '老王', '小李', '张三', '李四', '赵六', '钱七', '孙八', '周九'];
-    const usedNames = new Set([user.username]);
-
+    // 添加AI玩家（使用 AI-1, AI-2 格式）
     for (let i = 0; i < aiCount; i++) {
-      let aiName;
-      do {
-        aiName = aiNames[Math.floor(Math.random() * aiNames.length)];
-      } while (usedNames.has(aiName));
-
-      usedNames.add(aiName);
-      const ai = new AIPlayer(aiName, 5000, difficulty);
+      const aiName = `AI-${i + 1}`;
+      const aiId = `ai-${Date.now()}-${i}`; // 生成唯一的AI ID
+      const ai = new AIPlayer(aiId, aiName, 5000, difficulty);
       game.addPlayer(ai);
     }
 
@@ -725,6 +726,7 @@ async function startSinglePlayerGame() {
     state.game = game;
     state.inSinglePlayerGame = true;
     state.myHoleCards = [];
+    state.lastShowdownResults = null;  // 重置 showdown 结果
 
     // 显示游戏桌面
     showGameTable();
@@ -736,9 +738,20 @@ async function startSinglePlayerGame() {
 
       // 设置玩家底牌
       const me = game.players.find(p => p.id === user.id);
+      console.log('找到人类玩家:', me);
       if (me && me.holeCards) {
         state.myHoleCards = me.holeCards.map(c => c.toJSON());
       }
+
+      // 调试信息：显示所有玩家
+      console.log('所有玩家:');
+      game.players.forEach((p, i) => {
+        console.log(`  [${i}] ID: ${p.id}, Name: ${p.name}, isAI: ${p.isAI}`);
+      });
+
+      // 调试信息：当前玩家
+      console.log('当前玩家索引:', game.currentPlayerIndex);
+      console.log('当前玩家:', game.players[game.currentPlayerIndex]);
 
       renderSinglePlayerGame();
     } catch (error) {
@@ -753,12 +766,420 @@ async function startSinglePlayerGame() {
 }
 
 /**
+ * 更新游戏状态消息
+ */
+function updateGameStatusMessage(message) {
+  const statusEl = document.getElementById('game-status-message');
+  if (statusEl) {
+    statusEl.textContent = message;
+    console.log('游戏状态:', message);
+  }
+}
+
+/**
+ * 设置玩家操作按钮的事件监听器
+ */
+function setupPlayerButtonHandlers() {
+  console.log('设置玩家按钮事件监听器...');
+
+  // 玩家操作按钮
+  const foldBtn = document.getElementById('fold-btn');
+  const checkBtn = document.getElementById('check-btn');
+  const callBtn = document.getElementById('call-btn');
+  const raiseBtn = document.getElementById('raise-btn');
+  const allinBtn = document.getElementById('allin-btn');
+
+  if (!foldBtn || !checkBtn || !callBtn || !raiseBtn || !allinBtn) {
+    console.error('Some buttons not found!');
+    return;
+  }
+
+  // 添加事件监听器
+  foldBtn.addEventListener('click', (e) => {
+    console.log('Fold button clicked');
+    e.preventDefault();
+    e.stopPropagation();
+    playerActionInSinglePlayer('fold');
+  });
+
+  checkBtn.addEventListener('click', (e) => {
+    console.log('Check button clicked');
+    e.preventDefault();
+    e.stopPropagation();
+    playerActionInSinglePlayer('check');
+  });
+
+  callBtn.addEventListener('click', (e) => {
+    console.log('Call button clicked');
+    e.preventDefault();
+    e.stopPropagation();
+    playerActionInSinglePlayer('call');
+  });
+
+  raiseBtn.addEventListener('click', (e) => {
+    console.log('Raise button clicked');
+    e.preventDefault();
+    e.stopPropagation();
+    const slider = document.getElementById('raise-slider');
+    const input = document.getElementById('raise-amount');
+    const minRaiseSpan = document.getElementById('min-raise');
+    const maxRaiseSpan = document.getElementById('max-raise');
+    const errorDiv = document.getElementById('raise-error');
+    const user = auth.getCurrentUser();
+    const me = state.game.players.find(p => p.id === user.id);
+
+    if (me && state.game) {
+      // 最小加注：当前最大注的2倍，或至少是大盲注的2倍
+      const minRaise = Math.max(state.game.currentBet * 2, state.game.bigBlind * 2);
+      const maxRaise = me.chips;
+
+      input.value = minRaise;
+      input.min = minRaise;
+      input.max = maxRaise;
+      minRaiseSpan.textContent = minRaise;
+      maxRaiseSpan.textContent = maxRaise;
+      errorDiv.style.display = 'none';
+      console.log(`设置加注范围: ${minRaise} - ${maxRaise}, 当前值: ${minRaise}`);
+    }
+    slider.style.display = 'block';
+  });
+
+  allinBtn.addEventListener('click', (e) => {
+    console.log('All-in button clicked');
+    e.preventDefault();
+    e.stopPropagation();
+    playerActionInSinglePlayer('all-in');
+  });
+
+  // 加注确认
+  const confirmRaiseBtn = document.getElementById('confirm-raise-btn');
+  const cancelRaiseBtn = document.getElementById('cancel-raise-btn');
+  const decreaseRaiseBtn = document.getElementById('decrease-raise-btn');
+  const increaseRaiseBtn = document.getElementById('increase-raise-btn');
+  const raiseAmountInput = document.getElementById('raise-amount');
+  const raiseErrorDiv = document.getElementById('raise-error');
+
+  if (confirmRaiseBtn) {
+    confirmRaiseBtn.addEventListener('click', (e) => {
+      console.log('Confirm raise clicked');
+      e.preventDefault();
+
+      // 验证输入
+      const amount = parseInt(raiseAmountInput.value);
+      const user = auth.getCurrentUser();
+      const me = state.game.players.find(p => p.id === user.id);
+
+      if (me && state.game) {
+        const minRaise = Math.max(state.game.currentBet * 2, state.game.bigBlind * 2);
+        const maxRaise = me.chips;
+
+        // 验证输入
+        if (isNaN(amount)) {
+          raiseErrorDiv.textContent = '请输入有效的数字';
+          raiseErrorDiv.style.display = 'block';
+          return;
+        }
+
+        if (amount < minRaise) {
+          raiseErrorDiv.textContent = `加注金额不能少于 ${minRaise}`;
+          raiseErrorDiv.style.display = 'block';
+          return;
+        }
+
+        if (amount > maxRaise) {
+          raiseErrorDiv.textContent = `加注金额不能超过您的筹码 ${maxRaise}`;
+          raiseErrorDiv.style.display = 'block';
+          return;
+        }
+
+        // 输入有效，执行加注
+        playerActionInSinglePlayer('raise', amount);
+        document.getElementById('raise-slider').style.display = 'none';
+        raiseErrorDiv.style.display = 'none';
+      }
+    });
+  }
+
+  if (cancelRaiseBtn) {
+    cancelRaiseBtn.addEventListener('click', (e) => {
+      console.log('Cancel raise clicked');
+      e.preventDefault();
+      document.getElementById('raise-slider').style.display = 'none';
+      if (raiseErrorDiv) {
+        raiseErrorDiv.style.display = 'none';
+      }
+    });
+  }
+
+  // 减少加注金额按钮
+  if (decreaseRaiseBtn && raiseAmountInput) {
+    decreaseRaiseBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      const currentValue = parseInt(raiseAmountInput.value) || 0;
+      const user = auth.getCurrentUser();
+      const me = state.game.players.find(p => p.id === user.id);
+
+      if (me && state.game) {
+        const minRaise = Math.max(state.game.currentBet * 2, state.game.bigBlind * 2);
+        const newValue = Math.max(minRaise, currentValue - 10);
+        raiseAmountInput.value = newValue;
+      }
+    });
+  }
+
+  // 增加加注金额按钮
+  if (increaseRaiseBtn && raiseAmountInput) {
+    increaseRaiseBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      const currentValue = parseInt(raiseAmountInput.value) || 0;
+      const user = auth.getCurrentUser();
+      const me = state.game.players.find(p => p.id === user.id);
+
+      if (me && state.game) {
+        const maxRaise = me.chips;
+        const newValue = Math.min(maxRaise, currentValue + 10);
+        raiseAmountInput.value = newValue;
+      }
+    });
+  }
+
+  // 输入框验证
+  if (raiseAmountInput) {
+    raiseAmountInput.addEventListener('input', (e) => {
+      // 清除错误提示
+      if (raiseErrorDiv) {
+        raiseErrorDiv.style.display = 'none';
+      }
+    });
+
+    raiseAmountInput.addEventListener('blur', (e) => {
+      const value = parseInt(e.target.value);
+      const user = auth.getCurrentUser();
+      const me = state.game.players.find(p => p.id === user.id);
+
+      if (me && state.game && !isNaN(value)) {
+        const minRaise = Math.max(state.game.currentBet * 2, state.game.bigBlind * 2);
+        const maxRaise = me.chips;
+
+        // 自动调整到合法范围
+        if (value < minRaise) {
+          e.target.value = minRaise;
+        } else if (value > maxRaise) {
+          e.target.value = maxRaise;
+        }
+      }
+    });
+
+    console.log('加注输入框事件监听器已设置');
+  }
+
+  console.log('玩家按钮事件监听器设置完成');
+}
+
+/**
+ * 恢复原始的操作按钮
+ */
+function restorePlayerControls() {
+  const playerControls = document.getElementById('player-controls');
+  if (!playerControls) return;
+
+  // 恢复原始的按钮HTML
+  playerControls.innerHTML = `
+    <button class="btn btn-danger" id="fold-btn">弃牌</button>
+    <button class="btn btn-warning" id="check-btn">过牌</button>
+    <button class="btn btn-info" id="call-btn">跟注</button>
+    <button class="btn btn-success" id="raise-btn">加注</button>
+    <button class="btn btn-primary" id="allin-btn">全下</button>
+  `;
+
+  // 设置事件监听器
+  setupPlayerButtonHandlers();
+
+  console.log('已恢复操作按钮');
+}
+
+/**
+ * 显示"再开一局"按钮
+ */
+function showNewRoundButton() {
+  const playerControls = document.getElementById('player-controls');
+  if (!playerControls) return;
+
+  // 移除旧的按钮（如果存在）
+  const oldButton = document.getElementById('new-round-btn');
+  if (oldButton) {
+    oldButton.remove();
+  }
+
+  // 创建新按钮
+  const newRoundBtn = document.createElement('button');
+  newRoundBtn.id = 'new-round-btn';
+  newRoundBtn.className = 'btn btn-success';
+  newRoundBtn.textContent = '再开一局';
+  newRoundBtn.style.fontSize = '18px';
+  newRoundBtn.style.padding = '16px 32px';
+  newRoundBtn.style.margin = '0 auto';
+
+  newRoundBtn.addEventListener('click', () => {
+    console.log('点击再开一局');
+    startNewRoundInSinglePlayer();
+  });
+
+  // 清空并添加按钮
+  playerControls.innerHTML = '';
+  playerControls.appendChild(newRoundBtn);
+
+  console.log('已显示"再开一局"按钮');
+}
+
+/**
+ * 显示摊牌结果
+ */
+function showShowdownResults() {
+  const statusEl = document.getElementById('game-status-message');
+  if (!statusEl) return;
+
+  if (!state.lastShowdownResults || !state.lastShowdownResults.results) {
+    console.log('没有摊牌结果可显示');
+    return;
+  }
+
+  const user = auth.getCurrentUser();
+
+  // 创建结果HTML
+  let resultsHTML = '<div style="text-align: left; max-width: 600px; margin: 0 auto;">';
+
+  // 使用保存的 showdown 结果
+  state.lastShowdownResults.results.forEach((result) => {
+    const isWinner = result.isWinner;
+    const isMe = result.playerId === user.id;
+
+    // 获取玩家的底牌
+    let cardsHTML = '';
+    if (result.holeCards && result.holeCards.length > 0) {
+      cardsHTML = result.holeCards.map(card =>
+        `<span class="card ${card.name.includes('♥') || card.name.includes('♦') ? 'red' : 'black'}">${card.name}</span>`
+      ).join(' ');
+    }
+
+    resultsHTML += `
+      <div style="margin-bottom: 10px; padding: 10px; background: ${isWinner ? '#d4edda' : 'transparent'}; border-radius: 5px;">
+        <strong style="color: ${isWinner ? '#155724' : '#333'};">
+          ${isMe ? '★ ' : ''}${result.playerName}${isWinner ? ' (赢家!)' : ''}
+        </strong><br>
+        牌型: ${result.handName}<br>
+        底牌: ${cardsHTML || '已弃牌'}
+      </div>
+    `;
+  });
+
+  resultsHTML += '</div>';
+
+  // 更新状态消息
+  statusEl.innerHTML = resultsHTML;
+}
+
+/**
+ * 在单机游戏中开始新的一局
+ */
+function startNewRoundInSinglePlayer() {
+  if (!state.game) {
+    console.error('游戏对象不存在');
+    return;
+  }
+
+  const user = auth.getCurrentUser();
+
+  try {
+    console.log('开始新的一局...');
+
+    // 检查有多少玩家有足够的筹码继续游戏
+    const playersWithChips = state.game.players.filter(p => p.chips >= state.game.smallBlind * 2);
+    console.log(`有足够筹码的玩家数: ${playersWithChips.length}/${state.game.players.length}`);
+
+    // 如果少于2名玩家有足够筹码，才补充筹码
+    const INITIAL_CHIPS = 5000;
+    let needRebuy = false;
+
+    if (playersWithChips.length < 2) {
+      console.log('少于2名玩家有足够筹码，为所有玩家补充筹码');
+      state.game.players.forEach(player => {
+        if (player.chips < state.game.smallBlind * 2) {
+          console.log(`${player.name} 筹码不足，补充到 ${INITIAL_CHIPS}`);
+          player.chips = INITIAL_CHIPS;
+          player.active = true;
+          needRebuy = true;
+        }
+      });
+    } else {
+      // 有足够玩家继续游戏，只补充完全没筹码的玩家
+      state.game.players.forEach(player => {
+        if (player.chips <= 0) {
+          console.log(`${player.name} 筹码归零，补充到 ${INITIAL_CHIPS}`);
+          player.chips = INITIAL_CHIPS;
+          player.active = true;
+          needRebuy = true;
+        }
+      });
+    }
+
+    if (needRebuy) {
+      updateGameStatusMessage('已为筹码不足的玩家补充筹码');
+    }
+
+    // 重置游戏状态
+    const result = state.game.startNewRound();
+    console.log('新的一局开始:', result);
+
+    // 重置 showdown 结果
+    state.lastShowdownResults = null;
+
+    // 更新玩家底牌
+    const me = state.game.players.find(p => p.id === user.id);
+    if (me && me.holeCards) {
+      state.myHoleCards = me.holeCards.map(c => c.toJSON());
+    }
+
+    // 恢复操作按钮
+    restorePlayerControls();
+
+    // 重新渲染游戏
+    renderSinglePlayerGame();
+  } catch (error) {
+    console.error('开始新的一局错误:', error);
+    console.error('错误信息:', error.message);
+    console.error('错误堆栈:', error.stack);
+
+    // 显示详细错误信息
+    const errorMessage = error.message || '未知错误';
+    alert('开始新的一局失败: ' + errorMessage);
+
+    // 如果错误是因为玩家不足，提示用户
+    if (errorMessage.includes('至少2名玩家')) {
+      // 检查每个玩家的状态
+      console.log('玩家状态:');
+      state.game.players.forEach((p, i) => {
+        console.log(`  [${i}] ${p.name}: chips=${p.chips}, active=${p.active}, folded=${p.folded}`);
+      });
+
+      alert('所有AI都已失去筹码！游戏结束。');
+      // 返回主页面
+      state.game = null;
+      state.inSinglePlayerGame = false;
+      state.myHoleCards = [];
+      showMainPage();
+    }
+  }
+}
+
+/**
  * 渲染单机游戏
  */
 function renderSinglePlayerGame() {
   if (!state.game) return;
 
   const gameState = state.game.getState();
+  console.log('渲染游戏状态 - 阶段:', gameState.phase, '当前玩家索引:', gameState.currentPlayerIndex);
 
   // 更新阶段
   const phaseEl = document.getElementById('game-phase');
@@ -788,11 +1209,13 @@ function renderSinglePlayerGame() {
   // 渲染玩家座位
   renderSinglePlayerSeats(gameState);
 
-  // 更新操作按钮
+  // 更新操作按钮和状态消息
   updateSinglePlayerControls(gameState);
 
-  // 如果当前是AI回合，自动执行AI操作
-  setTimeout(() => processAITurn(), 1000);
+  // 只在游戏进行中且不是摊牌阶段时才处理AI
+  if (state.game.isRoundActive && gameState.phase !== 'showdown') {
+    setTimeout(() => processAITurn(), 1000);
+  }
 }
 
 /**
@@ -803,12 +1226,12 @@ function renderSinglePlayerSeats(gameState) {
   if (!container) return;
 
   const positions = [
-    { top: '50%', left: '50%', transform: 'translate(-50%, -50%)' },
-    { top: '20%', left: '50%', transform: 'translate(-50%, -50%)' },
-    { top: '35%', left: '15%', transform: 'translate(-50%, -50%)' },
-    { top: '35%', left: '85%', transform: 'translate(-50%, -50%)' },
-    { top: '65%', left: '15%', transform: 'translate(-50%, -50%)' },
-    { top: '65%', left: '85%', transform: 'translate(-50%, -50%)' }
+    { top: '70%', left: '50%', transform: 'translate(-50%, -50%)' },  // 底部（玩家）
+    { top: '20%', left: '50%', transform: 'translate(-50%, -50%)' },  // 顶部
+    { top: '30%', left: '12%', transform: 'translate(-50%, -50%)' },  // 左侧
+    { top: '30%', left: '88%', transform: 'translate(-50%, -50%)' },  // 右侧
+    { top: '70%', left: '12%', transform: 'translate(-50%, -50%)' },  // 左下
+    { top: '70%', left: '88%', transform: 'translate(-50%, -50%)' }   // 右下
   ];
 
   const user = auth.getCurrentUser();
@@ -817,12 +1240,34 @@ function renderSinglePlayerSeats(gameState) {
     const pos = positions[index % positions.length];
     const isCurrentPlayer = index === gameState.currentPlayerIndex;
     const isMe = player.id === user.id;
+    const isShowdown = gameState.phase === 'showdown';
 
     // 处理头像 - 使用 data URI 作为默认头像
     const avatar = player.avatar || '/assets/default-avatar.png';
     const avatarUrl = avatar.startsWith('http') || avatar.startsWith('data:')
       ? avatar
       : `data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzNiIgaGVpZ2h0PSIzNiIgdmlld0JveD0iMCAwIDM2I+PGNpcmNsZSBjeD0iMTgiIGN5PSIxOCIgcj0iMTgiIGZpbGw9IiNmZmZmZmYiLz48L3N2Zz4`;
+
+    // 在摊牌阶段，显示所有未弃牌玩家的底牌
+    let cardsHtml = '';
+    if (isMe && state.myHoleCards && state.myHoleCards.length > 0) {
+      // 显示自己的底牌
+      cardsHtml = state.myHoleCards.map(card => `
+        <div class="card ${card.name.includes('♥') || card.name.includes('♦') ? 'red' : 'black'}">
+          ${card.name}
+        </div>
+      `).join('');
+    } else if (isShowdown && !player.folded && player.holeCards && player.holeCards.length > 0) {
+      // 摊牌阶段显示未弃牌玩家的底牌
+      cardsHtml = player.holeCards.map(card => `
+        <div class="card ${card.name.includes('♥') || card.name.includes('♦') ? 'red' : 'black'}">
+          ${card.name}
+        </div>
+      `).join('');
+    } else {
+      // 隐藏底牌
+      cardsHtml = '<div class="card face-down">?</div><div class="card face-down">?</div>';
+    }
 
     return `
       <div class="seat ${isCurrentPlayer ? 'current-turn' : ''} ${player.active ? 'active' : ''}"
@@ -835,11 +1280,7 @@ function renderSinglePlayerSeats(gameState) {
           </div>
         </div>
         <div class="seat-cards">
-          ${isMe && state.myHoleCards && state.myHoleCards.length > 0 ? state.myHoleCards.map(card => `
-            <div class="card ${card.name.includes('♥') || card.name.includes('♦') ? 'red' : 'black'}">
-              ${card.name}
-            </div>
-          `).join('') : '<div class="card face-down">?</div><div class="card face-down">?</div>'}
+          ${cardsHtml}
         </div>
         ${player.currentRoundBet > 0 ? `<div class="seat-action">下注: ${player.currentRoundBet}</div>` : ''}
         ${player.folded ? '<div class="seat-action">已弃牌</div>' : ''}
@@ -855,56 +1296,246 @@ function renderSinglePlayerSeats(gameState) {
 function updateSinglePlayerControls(gameState) {
   const user = auth.getCurrentUser();
   const currentPlayer = gameState.players[gameState.currentPlayerIndex];
-  const isMyTurn = currentPlayer && currentPlayer.id === user.id;
 
+  console.log('===== 更新控制按钮 =====');
+  console.log('user.id:', user.id, '类型:', typeof user.id);
+  console.log('currentPlayer:', currentPlayer);
+  console.log('currentPlayer.id:', currentPlayer?.id, '类型:', typeof currentPlayer?.id);
+  console.log('currentPlayerIndex:', gameState.currentPlayerIndex);
+
+  // 检查每个玩家的ID
+  gameState.players.forEach((p, i) => {
+    console.log(`玩家[${i}]: id=${p.id} (${typeof p.id}), name=${p.name}, isAI=${p.isAI}`);
+  });
+
+  const isMyTurn = currentPlayer && isSameId(currentPlayer.id, user.id);
+  const isGameEnded = gameState.phase === 'showdown' || !gameState.isRoundActive;
+
+  console.log('是否我的回合:', isMyTurn, '游戏结束:', isGameEnded);
+
+  // 更新状态消息
+  if (currentPlayer) {
+    if (gameState.phase === 'showdown') {
+      // 检查是否有玩家输光筹码
+      const playersWithNoChips = state.game.players.filter(p => p.chips < state.game.smallBlind * 2);
+      if (playersWithNoChips.length > 0) {
+        updateGameStatusMessage('摊牌！游戏结束 - 部分玩家筹码已用完');
+      } else {
+        updateGameStatusMessage('摊牌！查看结果');
+      }
+      showNewRoundButton();
+      showShowdownResults();
+    } else if (isMyTurn) {
+      updateGameStatusMessage('轮到你了！请选择操作');
+    } else if (currentPlayer.isAI) {
+      updateGameStatusMessage(`${currentPlayer.name} 正在思考...`);
+    } else {
+      updateGameStatusMessage(`等待 ${currentPlayer.name} 行动...`);
+    }
+  }
+
+  // 如果游戏已结束，不继续处理按钮
+  if (isGameEnded) {
+    return;
+  }
+
+  // 根据是否我的回合禁用/启用按钮
   const buttons = document.querySelectorAll('.player-controls button:not(#confirm-raise-btn):not(#cancel-raise-btn)');
   buttons.forEach(btn => {
     btn.disabled = !isMyTurn;
+    console.log('按钮:', btn.id, 'disabled:', !isMyTurn);
   });
+
+  // 如果进入 showdown 且没有保存的结果，从 game 获取
+  if (gameState.phase === 'showdown' && !state.lastShowdownResults) {
+    console.log('进入 showdown，获取摊牌结果');
+
+    // 评估所有未弃牌玩家
+    const activePlayers = state.game.players.filter(p => !p.folded);
+    console.log('未弃牌玩家数:', activePlayers.length);
+
+    if (activePlayers.length === 0) {
+      console.log('没有未弃牌的玩家');
+      return;
+    }
+
+    const results = activePlayers.map(player => {
+      console.log(`评估玩家 ${player.name} 的手牌...`);
+      console.log(`  底牌:`, player.holeCards);
+      console.log(`  公共牌:`, state.game.communityCards);
+
+      const evaluation = state.game.evaluator.evaluate(
+        player.holeCards,
+        state.game.communityCards
+      );
+
+      console.log(`  牌型: ${evaluation.name} (rank: ${evaluation.rank})`);
+
+      return {
+        playerId: player.id,
+        playerName: player.name,
+        handRank: evaluation.rank,
+        handName: evaluation.name,
+        holeCards: player.holeCards.map(c => c.toJSON()),
+        isWinner: false
+      };
+    });
+
+    // 找出赢家（牌力最强的）
+    results.sort((a, b) => {
+      const comparison = state.game.evaluator.compareHands(
+        { rank: b.handRank },
+        { rank: a.handRank }
+      );
+      return comparison;
+    });
+
+    const winnerResult = results[0];
+    console.log('赢家:', winnerResult.playerName, '牌型:', winnerResult.handName);
+
+    // 标记所有赢家（可能有平局）
+    results.forEach(r => {
+      const comparison = state.game.evaluator.compareHands(
+        { rank: r.handRank },
+        { rank: winnerResult.handRank }
+      );
+      r.isWinner = comparison === 0;
+    });
+
+    const winners = results.filter(r => r.isWinner);
+
+    state.lastShowdownResults = {
+      results: results,
+      winners: winners.map(r => ({
+        playerId: r.playerId,
+        playerName: r.playerName,
+        amount: 0
+      })),
+      pot: state.game.pot
+    };
+
+    console.log('生成的 showdown 结果:', state.lastShowdownResults);
+  }
 
   // 根据当前状态显示/隐藏按钮
   const checkBtn = document.getElementById('check-btn');
   const callBtn = document.getElementById('call-btn');
 
   if (gameState.currentBet === 0) {
-    if (checkBtn) checkBtn.style.display = 'inline-block';
-    if (callBtn) callBtn.style.display = 'none';
+    if (checkBtn) {
+      checkBtn.style.display = 'inline-block';
+    }
+    if (callBtn) {
+      callBtn.style.display = 'none';
+    }
   } else {
-    if (checkBtn) checkBtn.style.display = 'none';
-    if (callBtn) callBtn.style.display = 'inline-block';
+    if (checkBtn) {
+      checkBtn.style.display = 'none';
+    }
+    if (callBtn) {
+      callBtn.style.display = 'inline-block';
+    }
   }
+
+  console.log('===== 更新控制按钮结束 =====');
 }
 
 /**
  * 玩家行动（单机模式）
  */
 function playerActionInSinglePlayer(action, amount = 0) {
-  if (!state.game || !state.inSinglePlayerGame) return;
+  console.log('playerActionInSinglePlayer called with:', action, amount);
+
+  if (!state.game || !state.inSinglePlayerGame) {
+    console.error('Game not active!');
+    return;
+  }
 
   const user = auth.getCurrentUser();
+  console.log('Current user:', user.id);
+  console.log('Game state:', state.game.getState());
+
+  // 显示操作消息
+  const actionNames = {
+    'fold': '弃牌',
+    'check': '过牌',
+    'call': `跟注 ${amount}`,
+    'raise': `加注到 ${amount}`,
+    'all-in': '全下'
+  };
+  updateGameStatusMessage(`你${actionNames[action] || action}`);
+
   try {
     const result = state.game.playerAction(user.id, action, amount);
-    console.log('玩家操作:', result);
+    console.log('玩家操作结果:', result);
+
+    // 检查是否只剩一名玩家（在玩家行动后）
+    const activePlayers = state.game.players.filter(p => !p.folded);
+    if (activePlayers.length === 1) {
+      console.log('玩家行动后只剩一名玩家，结束游戏');
+      const winner = activePlayers[0];
+      const winAmount = state.game.pot;
+
+      // 手动创建 showdown 结果
+      state.lastShowdownResults = {
+        results: [{
+          playerId: winner.id,
+          playerName: winner.name,
+          handRank: 0,
+          handName: '其他玩家弃牌',
+          holeCards: [],
+          isWinner: true
+        }],
+        winners: [{
+          playerId: winner.id,
+          playerName: winner.name,
+          amount: winAmount
+        }],
+        pot: winAmount
+      };
+
+      winner.chips += winAmount;
+      state.game.pot = 0;
+      state.game.isRoundActive = false;
+      state.game.currentPhase = 'showdown';
+
+      renderSinglePlayerGame();
+      return;
+    }
 
     // 处理阶段结束
     if (result.phaseEnd) {
       if (result.roundEnd) {
+        // 回合结束，保存 showdown 结果
+        if (result.results) {
+          state.lastShowdownResults = {
+            results: result.results,
+            winners: result.winners,
+            pot: result.pot
+          };
+          console.log('保存 showdown 结果:', state.lastShowdownResults);
+        }
         // 回合结束
         if (result.winners) {
           alert(`回合结束！赢家: ${result.winners.map(w => w.playerName).join(', ')}`);
         }
-      } else {
-        // 进入下一阶段，发公共牌
-        if (result.communityCards) {
-          state.game.communityCards = result.communityCards;
-        }
       }
+      // 不需要手动更新 communityCards，Game 对象已经管理了
     }
 
     renderSinglePlayerGame();
   } catch (error) {
     console.error('玩家操作错误:', error);
-    alert(error.message);
+    console.error('错误名称:', error.name);
+    console.error('错误信息:', error.message);
+    console.error('错误堆栈:', error.stack);
+
+    // 显示友好的错误消息
+    const errorMessage = error.message || '未知错误';
+    alert(`操作失败: ${errorMessage}`);
+
+    // 重新渲染游戏以恢复状态
+    renderSinglePlayerGame();
   }
 }
 
@@ -912,17 +1543,133 @@ function playerActionInSinglePlayer(action, amount = 0) {
  * 处理AI回合
  */
 function processAITurn() {
-  if (!state.game || !state.inSinglePlayerGame) return;
+  if (!state.game || !state.inSinglePlayerGame) {
+    console.log('processAITurn: 游戏未激活');
+    return;
+  }
 
+  const gameState = state.game.getState();
   const currentPlayerIndex = state.game.currentPlayerIndex;
   const currentPlayer = state.game.players[currentPlayerIndex];
 
-  // 如果不是AI或游戏结束，返回
-  if (!currentPlayer || !currentPlayer.isAI || !state.game.isRoundActive) {
+  console.log('===== processAITurn =====');
+  console.log('当前玩家索引:', currentPlayerIndex);
+  console.log('当前玩家:', currentPlayer?.name, 'isAI:', currentPlayer?.isAI, 'folded:', currentPlayer?.folded, 'hasAllIn:', currentPlayer?.hasAllIn);
+
+  // 检查游戏是否还在进行
+  if (!state.game.isRoundActive || gameState.phase === 'showdown') {
+    console.log('游戏已结束或进入摊牌，停止AI处理');
+    console.log('===== processAITurn 结束 =====');
+    return;
+  }
+
+  // 首先检查是否只剩一名玩家（这个检查必须在最前面）
+  const activePlayers = state.game.players.filter(p => !p.folded);
+  console.log('未弃牌玩家数:', activePlayers.length);
+
+  if (activePlayers.length === 1) {
+    console.log('只剩一名玩家，游戏应该立即结束');
+    // 结束游戏回合
+    const winner = activePlayers[0];
+    const winAmount = state.game.pot;
+
+    // 手动创建 showdown 结果
+    state.lastShowdownResults = {
+      results: [{
+        playerId: winner.id,
+        playerName: winner.name,
+        handRank: 0,
+        handName: '其他玩家弃牌',
+        holeCards: [],
+        isWinner: true
+      }],
+      winners: [{
+        playerId: winner.id,
+        playerName: winner.name,
+        amount: winAmount
+      }],
+      pot: winAmount
+    };
+
+    // 分配底池
+    winner.chips += winAmount;
+    state.game.pot = 0;
+    state.game.isRoundActive = false;
+    state.game.currentPhase = 'showdown';
+
+    console.log(`赢家 ${winner.name} 获得 ${winAmount} 筹码`);
+
+    setTimeout(() => {
+      renderSinglePlayerGame();
+    }, 100);
+    console.log('===== processAITurn 结束 =====');
+    return;
+  }
+
+  // 如果当前玩家已弃牌或不存在，说明状态有问题，尝试修复
+  if (!currentPlayer || currentPlayer.folded || !currentPlayer.isAI) {
+    console.log('当前玩家状态异常或不是AI，跳过');
+    console.log('currentPlayer存在:', !!currentPlayer);
+    console.log('currentPlayer.folded:', currentPlayer?.folded);
+    console.log('currentPlayer.isAI:', currentPlayer?.isAI);
+
+    // 如果当前玩家已弃牌，尝试移动到下一个玩家
+    if (currentPlayer && currentPlayer.folded) {
+      console.log('尝试移动到下一个玩家');
+      const moved = state.game.moveToNextPlayer();
+      const result = state.game.checkPhaseEnd();
+
+      if (result.roundEnd) {
+        // 保存 showdown 结果
+        if (result.results) {
+          state.lastShowdownResults = {
+            results: result.results,
+            winners: result.winners,
+            pot: result.pot
+          };
+          console.log('保存 showdown 结果:', state.lastShowdownResults);
+        }
+        // 回合结束
+        if (result.winners) {
+          setTimeout(() => {
+            alert(`回合结束！赢家: ${result.winners.map(w => w.playerName).join(', ')}`);
+          }, 500);
+        } else if (result.winner) {
+          setTimeout(() => {
+            alert(`回合结束！赢家: ${result.winner.name}`);
+            result.winner.chips += state.game.pot;
+            renderSinglePlayerGame();
+          }, 500);
+        }
+      } else {
+        // 继续处理
+        renderSinglePlayerGame();
+        if (!result.phaseEnd) {
+          setTimeout(() => processAITurn(), 1000);
+        }
+      }
+    }
+
+    console.log('===== processAITurn 结束 =====');
+    return;
+  }
+
+  const user = auth.getCurrentUser();
+  const isMyTurn = isSameId(currentPlayer.id, user.id);
+
+  console.log('user.id:', user.id);
+  console.log('currentPlayer.id:', currentPlayer.id);
+  console.log('是否人类玩家回合:', isMyTurn);
+
+  // 如果是人类玩家回合，不处理AI
+  if (isMyTurn) {
+    console.log('是人类玩家回合，不处理AI');
+    console.log('===== processAITurn 结束 =====');
     return;
   }
 
   console.log('AI思考中:', currentPlayer.name);
+  updateGameStatusMessage(`${currentPlayer.name} 正在思考...`);
 
   // AI决策
   setTimeout(() => {
@@ -933,23 +1680,69 @@ function processAITurn() {
       const result = state.game.playerAction(currentPlayer.id, action.type, action.amount);
       console.log('AI操作结果:', result);
 
+      // 检查是否只剩一名玩家（在AI行动后）
+      const activePlayers = state.game.players.filter(p => !p.folded);
+      if (activePlayers.length === 1) {
+        console.log('AI行动后只剩一名玩家，结束游戏');
+        const winner = activePlayers[0];
+        const winAmount = state.game.pot;
+
+        // 手动创建 showdown 结果
+        state.lastShowdownResults = {
+          results: [{
+            playerId: winner.id,
+            playerName: winner.name,
+            handRank: 0,
+            handName: '其他玩家弃牌',
+            holeCards: [],
+            isWinner: true
+          }],
+          winners: [{
+            playerId: winner.id,
+            playerName: winner.name,
+            amount: winAmount
+          }],
+          pot: winAmount
+        };
+
+        winner.chips += winAmount;
+        state.game.pot = 0;
+        state.game.isRoundActive = false;
+        state.game.currentPhase = 'showdown';
+
+        renderSinglePlayerGame();
+        return;
+      }
+
       // 检查是否回合结束
       if (result.phaseEnd && result.roundEnd) {
+        // 保存 showdown 结果
+        if (result.results) {
+          state.lastShowdownResults = {
+            results: result.results,
+            winners: result.winners,
+            pot: result.pot
+          };
+          console.log('保存 showdown 结果:', state.lastShowdownResults);
+        }
         if (result.winners) {
           setTimeout(() => {
             alert(`回合结束！赢家: ${result.winners.map(w => w.playerName).join(', ')}`);
           }, 500);
         }
+        // 渲染游戏以显示"再开一局"按钮
+        renderSinglePlayerGame();
+        return; // 回合结束，不再继续AI
       }
 
       renderSinglePlayerGame();
 
       // 继续下一个AI
-      if (!result.roundEnd) {
-        setTimeout(() => processAITurn(), 1500);
-      }
+      setTimeout(() => processAITurn(), 1500);
     } catch (error) {
       console.error('AI操作错误:', error);
+      // 出错时也尝试继续游戏
+      renderSinglePlayerGame();
     }
   }, 1000);
 }
@@ -958,6 +1751,8 @@ function processAITurn() {
  * 设置单机游戏处理器
  */
 function setupSinglePlayerGameHandlers() {
+  console.log('Setting up single player game handlers...');
+
   // 玩家操作按钮
   const foldBtn = document.getElementById('fold-btn');
   const checkBtn = document.getElementById('check-btn');
@@ -965,52 +1760,220 @@ function setupSinglePlayerGameHandlers() {
   const raiseBtn = document.getElementById('raise-btn');
   const allinBtn = document.getElementById('allin-btn');
 
-  foldBtn.addEventListener('click', () => playerActionInSinglePlayer('fold'));
-  checkBtn.addEventListener('click', () => playerActionInSinglePlayer('check'));
-  callBtn.addEventListener('click', () => playerActionInSinglePlayer('call'));
+  console.log('Button elements:', { foldBtn, checkBtn, callBtn, raiseBtn, allinBtn });
 
-  raiseBtn.addEventListener('click', () => {
+  if (!foldBtn || !checkBtn || !callBtn || !raiseBtn || !allinBtn) {
+    console.error('Some buttons not found!');
+    return;
+  }
+
+  // 移除旧的事件监听器（如果存在）
+  const newFoldBtn = foldBtn.cloneNode(true);
+  const newCheckBtn = checkBtn.cloneNode(true);
+  const newCallBtn = callBtn.cloneNode(true);
+  const newRaiseBtn = raiseBtn.cloneNode(true);
+  const newAllinBtn = allinBtn.cloneNode(true);
+
+  foldBtn.parentNode.replaceChild(newFoldBtn, foldBtn);
+  checkBtn.parentNode.replaceChild(newCheckBtn, checkBtn);
+  callBtn.parentNode.replaceChild(newCallBtn, callBtn);
+  raiseBtn.parentNode.replaceChild(newRaiseBtn, raiseBtn);
+  allinBtn.parentNode.replaceChild(newAllinBtn, allinBtn);
+
+  // 添加新的事件监听器
+  newFoldBtn.addEventListener('click', (e) => {
+    console.log('Fold button clicked');
+    e.preventDefault();
+    e.stopPropagation();
+    playerActionInSinglePlayer('fold');
+  });
+
+  newCheckBtn.addEventListener('click', (e) => {
+    console.log('Check button clicked');
+    e.preventDefault();
+    e.stopPropagation();
+    playerActionInSinglePlayer('check');
+  });
+
+  newCallBtn.addEventListener('click', (e) => {
+    console.log('Call button clicked');
+    e.preventDefault();
+    e.stopPropagation();
+    playerActionInSinglePlayer('call');
+  });
+
+  newRaiseBtn.addEventListener('click', (e) => {
+    console.log('Raise button clicked');
+    e.preventDefault();
+    e.stopPropagation();
     const slider = document.getElementById('raise-slider');
     const input = document.getElementById('raise-amount');
+    const minRaiseSpan = document.getElementById('min-raise');
+    const maxRaiseSpan = document.getElementById('max-raise');
+    const errorDiv = document.getElementById('raise-error');
     const user = auth.getCurrentUser();
     const me = state.game.players.find(p => p.id === user.id);
 
     if (me && state.game) {
-      const minRaise = state.game.currentBet * 2;
-      input.min = minRaise;
-      input.max = me.chips;
+      // 最小加注：当前最大注的2倍，或至少是大盲注的2倍
+      const minRaise = Math.max(state.game.currentBet * 2, state.game.bigBlind * 2);
+      const maxRaise = me.chips;
+
       input.value = minRaise;
-      document.getElementById('raise-value').textContent = minRaise;
+      input.min = minRaise;
+      input.max = maxRaise;
+      minRaiseSpan.textContent = minRaise;
+      maxRaiseSpan.textContent = maxRaise;
+      errorDiv.style.display = 'none';
+      console.log(`设置加注范围: ${minRaise} - ${maxRaise}, 当前值: ${minRaise}`);
     }
     slider.style.display = 'block';
   });
 
-  allinBtn.addEventListener('click', () => playerActionInSinglePlayer('all-in'));
+  newAllinBtn.addEventListener('click', (e) => {
+    console.log('All-in button clicked');
+    e.preventDefault();
+    e.stopPropagation();
+    playerActionInSinglePlayer('all-in');
+  });
 
-  // 加注确认
+  // 加注相关按钮和输入框
+  const decreaseRaiseBtn = document.getElementById('decrease-raise-btn');
+  const increaseRaiseBtn = document.getElementById('increase-raise-btn');
+  const raiseAmountInput = document.getElementById('raise-amount');
+  const raiseErrorDiv = document.getElementById('raise-error');
   const confirmRaiseBtn = document.getElementById('confirm-raise-btn');
   const cancelRaiseBtn = document.getElementById('cancel-raise-btn');
 
-  confirmRaiseBtn.addEventListener('click', () => {
-    const amount = parseInt(document.getElementById('raise-amount').value);
-    playerActionInSinglePlayer('raise', amount);
-    document.getElementById('raise-slider').style.display = 'none';
-  });
+  // 减少加注金额
+  if (decreaseRaiseBtn && raiseAmountInput) {
+    decreaseRaiseBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const currentValue = parseInt(raiseAmountInput.value) || 0;
+      const user = auth.getCurrentUser();
+      const me = state.game.players.find(p => p.id === user.id);
 
-  cancelRaiseBtn.addEventListener('click', () => {
-    document.getElementById('raise-slider').style.display = 'none';
-  });
+      if (me && state.game) {
+        const minRaise = Math.max(state.game.currentBet * 2, state.game.bigBlind * 2);
+        const newValue = Math.max(minRaise, currentValue - 10);
+        raiseAmountInput.value = newValue;
+      }
+    });
+  }
+
+  // 增加加注金额
+  if (increaseRaiseBtn && raiseAmountInput) {
+    increaseRaiseBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const currentValue = parseInt(raiseAmountInput.value) || 0;
+      const user = auth.getCurrentUser();
+      const me = state.game.players.find(p => p.id === user.id);
+
+      if (me && state.game) {
+        const maxRaise = me.chips;
+        const newValue = Math.min(maxRaise, currentValue + 10);
+        raiseAmountInput.value = newValue;
+      }
+    });
+  }
+
+  // 输入框验证
+  if (raiseAmountInput) {
+    raiseAmountInput.addEventListener('input', (e) => {
+      if (raiseErrorDiv) {
+        raiseErrorDiv.style.display = 'none';
+      }
+    });
+
+    raiseAmountInput.addEventListener('blur', (e) => {
+      const value = parseInt(e.target.value);
+      const user = auth.getCurrentUser();
+      const me = state.game.players.find(p => p.id === user.id);
+
+      if (me && state.game && !isNaN(value)) {
+        const minRaise = Math.max(state.game.currentBet * 2, state.game.bigBlind * 2);
+        const maxRaise = me.chips;
+
+        // 自动调整到合法范围
+        if (value < minRaise) {
+          e.target.value = minRaise;
+        } else if (value > maxRaise) {
+          e.target.value = maxRaise;
+        }
+      }
+    });
+  }
+
+  // 确认加注
+  if (confirmRaiseBtn) {
+    confirmRaiseBtn.addEventListener('click', (e) => {
+      console.log('Confirm raise clicked');
+      e.preventDefault();
+
+      // 验证输入
+      const amount = parseInt(raiseAmountInput.value);
+      const user = auth.getCurrentUser();
+      const me = state.game.players.find(p => p.id === user.id);
+
+      if (me && state.game) {
+        const minRaise = Math.max(state.game.currentBet * 2, state.game.bigBlind * 2);
+        const maxRaise = me.chips;
+
+        // 验证输入
+        if (isNaN(amount)) {
+          raiseErrorDiv.textContent = '请输入有效的数字';
+          raiseErrorDiv.style.display = 'block';
+          return;
+        }
+
+        if (amount < minRaise) {
+          raiseErrorDiv.textContent = `加注金额不能少于 ${minRaise}`;
+          raiseErrorDiv.style.display = 'block';
+          return;
+        }
+
+        if (amount > maxRaise) {
+          raiseErrorDiv.textContent = `加注金额不能超过您的筹码 ${maxRaise}`;
+          raiseErrorDiv.style.display = 'block';
+          return;
+        }
+
+        // 输入有效，执行加注
+        playerActionInSinglePlayer('raise', amount);
+        document.getElementById('raise-slider').style.display = 'none';
+        raiseErrorDiv.style.display = 'none';
+      }
+    });
+  }
+
+  // 取消加注
+  if (cancelRaiseBtn) {
+    cancelRaiseBtn.addEventListener('click', (e) => {
+      console.log('Cancel raise clicked');
+      e.preventDefault();
+      document.getElementById('raise-slider').style.display = 'none';
+      if (raiseErrorDiv) {
+        raiseErrorDiv.style.display = 'none';
+      }
+    });
+  }
 
   // 离开游戏按钮
   const leaveBtn = document.getElementById('leave-game-btn');
-  leaveBtn.addEventListener('click', () => {
-    if (confirm('确定要离开游戏吗？')) {
-      state.game = null;
-      state.inSinglePlayerGame = false;
-      state.myHoleCards = [];
-      showMainPage();
-    }
-  });
+  if (leaveBtn) {
+    leaveBtn.addEventListener('click', () => {
+      if (confirm('确定要离开游戏吗？')) {
+        state.game = null;
+        state.inSinglePlayerGame = false;
+        state.myHoleCards = [];
+        showMainPage();
+      }
+    });
+  }
+
+  console.log('Single player game handlers setup complete');
 }
 
 // 初始化应用

@@ -172,6 +172,18 @@ body {
   background: #2980b9;
 }
 
+/* 禁用按钮样式 */
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: #95a5a6;
+}
+
+.btn:disabled:hover {
+  background: #95a5a6;
+  transform: none;
+}
+
 .auth-error {
   margin-top: 15px;
   color: var(--danger-color);
@@ -540,6 +552,23 @@ body {
   justify-content: center;
   gap: 15px;
   margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.player-controls button {
+  min-width: 100px;
+  padding: 14px 28px;
+  font-size: 16px;
+  transition: all 0.3s;
+}
+
+.player-controls button:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.player-controls button:active:not(:disabled) {
+  transform: translateY(0);
 }
 
 .raise-slider {
@@ -548,11 +577,19 @@ body {
   border-radius: var(--border-radius);
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
   margin-bottom: 20px;
+  text-align: center;
 }
 
 .raise-slider input {
   width: 100%;
   margin-bottom: 10px;
+}
+
+.raise-slider span {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--primary-color);
+  margin: 0 10px;
 }
 
 /* 响应式 */
@@ -612,4 +649,14 @@ body {
     width: 45px;
     height: 63px;
   }
+}
+
+/* 摊牌结果样式 */
+#game-status-message .card {
+  display: inline-block;
+  padding: 2px 4px;
+  margin: 0 2px;
+  border-radius: 3px;
+  background: white;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
 }

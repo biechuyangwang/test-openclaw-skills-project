@@ -12,7 +12,7 @@ class Player {
     this.totalBet = 0; // 总下注额
     this.currentRoundBet = 0; // 本轮下注额
     this.folded = false;
-    this.allIn = false;
+    this.hasAllIn = false;  // 重命名：避免与 allIn() 方法冲突
     this.active = true; // 是否在游戏中
     this.avatar = isAI ? '/assets/ai-avatar.png' : '/assets/default-avatar.png';
   }
@@ -23,11 +23,14 @@ class Player {
       amount = this.chips; // 全下
     }
 
+    console.log(`[Player ${this.name}] 下注 ${amount}, 剩余筹码: ${this.chips} -> ${this.chips - amount}`);
+
     this.chips -= amount;
     this.currentRoundBet += amount;
 
     if (this.chips === 0) {
-      this.allIn = true;
+      console.log(`[Player ${this.name}] 筹码归零，标记为全下`);
+      this.hasAllIn = true;
     }
 
     return amount;
@@ -67,8 +70,9 @@ class Player {
     this.totalBet = 0;
     this.currentRoundBet = 0;
     this.folded = false;
-    this.allIn = false;
+    this.hasAllIn = false;
     this.active = this.chips > 0;
+    this.hasActed = false; // 本轮是否已行动
   }
 
   // 重置本轮下注（新阶段）
@@ -84,14 +88,21 @@ class Player {
   // 获取状态
   getStatus() {
     if (this.folded) return 'folded';
-    if (this.allIn) return 'all-in';
+    if (this.hasAllIn) return 'all-in';
     if (!this.active) return 'inactive';
     return 'active';
   }
 
   // 是否可以行动
   canAct() {
-    return this.active && !this.folded && !this.allIn;
+    // 全下的玩家不能行动，但需要参与游戏（直到摊牌）
+    // 这里只检查是否可以主动行动
+    return this.active && !this.folded && !this.hasAllIn;
+  }
+
+  // 是否在游戏中（包括全下）
+  isInGame() {
+    return this.active && !this.folded;
   }
 
   // 转换为JSON
@@ -103,7 +114,7 @@ class Player {
       bet: this.currentRoundBet,
       holeCards: hideCards ? [] : this.holeCards.map(c => c.toJSON()),
       folded: this.folded,
-      allIn: this.allIn,
+      allIn: this.hasAllIn,  // 保持 JSON 中的字段名为 allIn 以兼容前端
       active: this.active,
       status: this.getStatus(),
       isAI: this.isAI,

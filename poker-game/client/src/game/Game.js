@@ -69,12 +69,6 @@ class Game {
    * 开始新一轮
    */
   startNewRound() {
-    // 检查是否有足够玩家
-    const activePlayers = this.players.filter(p => p.active);
-    if (activePlayers.length < 2) {
-      throw new Error('需要至少2名玩家才能开始游戏');
-    }
-
     // 重置状态
     this.deck.reset();
     this.deck.shuffle();
@@ -84,9 +78,15 @@ class Game {
     this.currentPhase = 'preflop';
     this.isRoundActive = true;
 
-    // 重置玩家状态
+    // 先重置玩家状态（这会更新 active 标志）
     for (const player of this.players) {
       player.resetForNewRound();
+    }
+
+    // 检查是否有足够玩家（在重置后检查）
+    const activePlayers = this.players.filter(p => p.active);
+    if (activePlayers.length < 2) {
+      throw new Error('需要至少2名玩家才能开始游戏');
     }
 
     // 移动庄家位置
@@ -98,15 +98,23 @@ class Game {
     const sbPlayer = this.players[this.smallBlindPosition];
     const bbPlayer = this.players[this.bigBlindPosition];
 
+    console.log(`[Game] 收取盲注 - SB位置: ${this.smallBlindPosition}, BB位置: ${this.bigBlindPosition}`);
+
     if (sbPlayer.active) {
       const sbAmount = sbPlayer.bet(this.smallBlind);
       this.pot += sbAmount;
+      console.log(`[Game] ${sbPlayer.name} 下小盲 ${sbAmount}`);
     }
 
     if (bbPlayer.active) {
       const bbAmount = bbPlayer.bet(this.bigBlind);
       this.pot += bbAmount;
+      console.log(`[Game] ${bbPlayer.name} 下大盲 ${bbAmount}`);
     }
+
+    // 在翻牌前，盲注玩家不算作已行动（他们仍需跟注或加注）
+    // 其他阶段盲注不算，所有人都没有行动
+    console.log(`[Game] 盲注收取完成，底池: ${this.pot}`);
 
     // 发底牌
     for (const player of this.players) {
@@ -138,12 +146,41 @@ class Game {
       throw new Error('玩家不存在');
     }
 
+    // 详细的玩家状态检查
+    console.log(`[Game] 玩家 ${player.name} 尝试 ${action}`);
+    console.log(`[Game] 玩家状态: active=${player.active}, folded=${player.folded}, hasAllIn=${player.hasAllIn}`);
+    console.log(`[Game] canAct()=${player.canAct()}`);
+
     if (!player.canAct()) {
-      throw new Error('玩家无法行动');
+      let reason = '';
+      if (!player.active) reason = '玩家不在游戏中';
+      else if (player.folded) reason = '玩家已弃牌';
+      else if (player.hasAllIn) reason = '玩家已全下';
+      throw new Error(`玩家无法行动: ${reason}`);
     }
 
     if (this.players[this.currentPlayerIndex].id !== playerId) {
       throw new Error('不是该玩家的回合');
+    }
+
+    // 检查是否只剩一名玩家（在行动之前检查）
+    const playersNotFolded = this.players.filter(p => !p.folded);
+    if (playersNotFolded.length === 1) {
+      console.log(`[Game] 在玩家行动前检测到只剩一名玩家: ${playersNotFolded[0].name}`);
+      return {
+        action: { playerId, action },
+        currentPlayerIndex: this.currentPlayerIndex,
+        pot: this.pot,
+        currentBet: this.currentBet,
+        phaseEnd: true,
+        roundEnd: true,
+        winners: [{
+          playerId: playersNotFolded[0].id,
+          playerName: playersNotFolded[0].name,
+          amount: this.pot
+        }],
+        pot: this.pot
+      };
     }
 
     let betAmount = 0;
@@ -182,11 +219,17 @@ class Game {
         break;
 
       case 'all-in':
+        console.log(`[Game] 执行全下操作 - 玩家: ${player.name}, 筹码: ${player.chips}`);
+
+        // 直接调用 allIn 方法（现在不会与属性冲突了）
         betAmount = player.allIn();
         this.pot += betAmount;
+        console.log(`[Game] 全下完成 - 下注额: ${betAmount}, 当前本轮下注: ${player.currentRoundBet}, 游戏当前下注: ${this.currentBet}`);
+
         if (player.currentRoundBet > this.currentBet) {
           this.currentBet = player.currentRoundBet;
           this.lastAggressorIndex = this.players.indexOf(player);
+          console.log(`[Game] 更新当前下注和最后加注者: ${this.currentBet}, 索引: ${this.lastAggressorIndex}`);
         }
         this.lastAction = { playerId, action: 'all-in', amount: betAmount };
         break;
@@ -195,8 +238,11 @@ class Game {
         throw new Error('无效的操作');
     }
 
+    // 标记该玩家已行动
+    player.hasActed = true;
+
     // 移动到下一个玩家
-    this.moveToNextPlayer();
+    const movedToEnd = this.moveToNextPlayer();
 
     // 检查是否需要进入下一阶段
     const phaseResult = this.checkPhaseEnd();
@@ -214,31 +260,56 @@ class Game {
    * 移动到下一个玩家
    */
   moveToNextPlayer() {
+    // 计算可以行动的玩家数量
+    const activePlayers = this.players.filter(p => !p.folded && !p.hasAllIn);
+    const maxAttempts = activePlayers.length + 1;  // 稍微多一点，确保能循环一圈
+
     let attempts = 0;
-    const maxAttempts = this.players.length * 2;
+
+    console.log(`[Game] moveToNextPlayer - 当前索引: ${this.currentPlayerIndex}, 活跃玩家数: ${activePlayers.length}, 总玩家数: ${this.players.length}`);
 
     do {
       this.currentPlayerIndex = (this.currentPlayerIndex + 1) % this.players.length;
       attempts++;
 
+      // 添加边界检查
+      if (this.currentPlayerIndex < 0 || this.currentPlayerIndex >= this.players.length) {
+        console.error(`[Game] 无效的玩家索引: ${this.currentPlayerIndex}`);
+        return true;
+      }
+
       const player = this.players[this.currentPlayerIndex];
+      if (!player) {
+        console.error(`[Game] 玩家对象不存在，索引: ${this.currentPlayerIndex}`);
+        return true;
+      }
+
+      console.log(`[Game] 尝试玩家 ${this.currentPlayerIndex}: ${player.name}, folded: ${player.folded}, hasAllIn: ${player.hasAllIn}, canAct: ${player.canAct()}`);
+
+      // 检查是否只剩一名玩家
+      const playersNotFolded = this.players.filter(p => !p.folded);
+      if (playersNotFolded.length === 1) {
+        console.log(`[Game] 只剩一名玩家: ${playersNotFolded[0].name}`);
+        return true; // 回合结束
+      }
 
       // 检查是否所有活跃玩家都已行动且下注相等
-      if (this.currentPlayerIndex === this.lastAggressorIndex &&
+      if (this.lastAggressorIndex >= 0 &&
+          this.currentPlayerIndex === this.lastAggressorIndex &&
           this.areAllActivePlayersMatched()) {
+        console.log(`[Game] 回到最后加注者，所有玩家下注匹配`);
         return true; // 阶段结束
       }
 
-      // 找到可以行动的玩家
-      if (player.canAct() && player.currentRoundBet < this.currentBet) {
-        return false;
-      } else if (player.canAct() && player.currentRoundBet === this.currentBet) {
-        // 可以过牌
+      // 找到可以行动的玩家（未弃牌、未全下）
+      if (!player.folded && !player.hasAllIn) {
+        console.log(`[Game] 找到可以行动的玩家: ${player.name}`);
         return false;
       }
 
     } while (attempts < maxAttempts);
 
+    console.log(`[Game] 超过最大尝试次数，结束阶段`);
     return true;
   }
 
@@ -246,9 +317,11 @@ class Game {
    * 检查所有活跃玩家下注是否匹配
    */
   areAllActivePlayersMatched() {
-    const activePlayers = this.players.filter(p => p.canAct());
+    // 只检查未弃牌的玩家（包括全下的玩家）
+    const activePlayers = this.players.filter(p => !p.folded);
     if (activePlayers.length === 0) return true;
 
+    // 检查所有未弃牌的玩家下注是否相等
     const firstBet = activePlayers[0].currentRoundBet;
     return activePlayers.every(p => p.currentRoundBet === firstBet);
   }
@@ -257,21 +330,33 @@ class Game {
    * 检查阶段是否结束
    */
   checkPhaseEnd() {
-    if (!this.areAllActivePlayersMatched()) {
-      return { phaseEnd: false };
-    }
+    const playersNotFolded = this.players.filter(p => !p.folded);
+    console.log(`[Game] checkPhaseEnd - 未弃牌玩家数: ${playersNotFolded.length}`);
 
-    // 检查是否只剩一名玩家
-    const activePlayers = this.players.filter(p => !p.folded);
-    if (activePlayers.length === 1) {
+    // 首先检查是否只剩一名玩家（重要：这个检查必须在最前面）
+    if (playersNotFolded.length === 1) {
+      console.log(`[Game] 只剩一名玩家，回合结束: ${playersNotFolded[0].name}`);
       return {
         phaseEnd: true,
         roundEnd: true,
-        winner: activePlayers[0],
+        winner: playersNotFolded[0],
         pot: this.pot
       };
     }
 
+    // 检查是否所有未弃牌玩家都已行动且下注相等
+    // 全下的玩家自动算作已行动
+    const playersWhoCanAct = playersNotFolded.filter(p => !p.hasAllIn);
+    const allActed = playersWhoCanAct.every(p => p.hasActed) || playersWhoCanAct.length === 0;
+
+    console.log(`[Game] 可行动玩家数: ${playersWhoCanAct.length}, 都已行动: ${allActed}`);
+    console.log(`[Game] 下注匹配: ${this.areAllActivePlayersMatched()}`);
+
+    if (!allActed || !this.areAllActivePlayersMatched()) {
+      return { phaseEnd: false };
+    }
+
+    console.log(`[Game] 所有玩家已行动且下注匹配，进入下一阶段`);
     // 进入下一阶段
     return this.nextPhase();
   }
@@ -280,27 +365,61 @@ class Game {
    * 进入下一阶段
    */
   nextPhase() {
-    // 重置玩家本轮下注
+    console.log(`[Game] 进入下一阶段，当前: ${this.currentPhase}`);
+
+    // 重置玩家本轮下注和行动状态
     for (const player of this.players) {
       player.resetRoundBet();
+      player.hasActed = false;
+      console.log(`[Game] 重置 ${player.name} 的状态, folded: ${player.folded}, hasAllIn: ${player.hasAllIn}`);
     }
 
     this.currentBet = 0;
-    this.currentPlayerIndex = (this.dealerPosition + 1) % this.players.length;
+
+    // 找到庄家之后的第一个未弃牌玩家
+    let nextPlayerIndex = (this.dealerPosition + 1) % this.players.length;
+    let found = false;
+    for (let i = 0; i < this.players.length; i++) {
+      const player = this.players[nextPlayerIndex];
+      if (!player.folded && !player.hasAllIn) {
+        found = true;
+        break;
+      }
+      nextPlayerIndex = (nextPlayerIndex + 1) % this.players.length;
+    }
+
+    if (!found) {
+      // 如果没有可以行动的玩家（所有人都弃牌或全下），直接进入摊牌
+      console.log('[Game] 没有可行动的玩家，进入摊牌');
+      return this.showdown();
+    }
+
+    this.currentPlayerIndex = nextPlayerIndex;
     this.lastAggressorIndex = this.dealerPosition;
+
+    // 添加边界检查
+    if (this.currentPlayerIndex < 0 || this.currentPlayerIndex >= this.players.length) {
+      console.error(`[Game] 无效的玩家索引: ${this.currentPlayerIndex}，玩家总数: ${this.players.length}`);
+      throw new Error(`无效的玩家索引: ${this.currentPlayerIndex}`);
+    }
+
+    console.log(`[Game] 新阶段第一个玩家索引: ${this.currentPlayerIndex} (${this.players[nextPlayerIndex]?.name || '未知'})`);
 
     switch (this.currentPhase) {
       case 'preflop':
         this.currentPhase = 'flop';
         this.communityCards.push(...this.deck.dealMultiple(3));
+        console.log('[Game] 发翻牌（3张）');
         break;
       case 'flop':
         this.currentPhase = 'turn';
         this.communityCards.push(this.deck.deal());
+        console.log('[Game] 发转牌（1张）');
         break;
       case 'turn':
         this.currentPhase = 'river';
         this.communityCards.push(this.deck.deal());
+        console.log('[Game] 发河牌（1张）');
         break;
       case 'river':
         return this.showdown();

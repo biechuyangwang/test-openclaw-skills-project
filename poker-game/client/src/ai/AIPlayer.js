@@ -5,8 +5,8 @@ import HandEvaluator from '../game/HandEvaluator';
  * AI 玩家类
  */
 class AIPlayer extends Player {
-  constructor(name, chips = 5000, difficulty = 'medium') {
-    super(name, chips, true);
+  constructor(id, name, chips = 5000, difficulty = 'medium') {
+    super(id, name, chips, true);
     this.difficulty = difficulty;
     this.evaluator = new HandEvaluator();
     this.thinkingTime = 1000 + Math.random() * 2000; // 1-3秒思考时间
@@ -28,16 +28,33 @@ class AIPlayer extends Player {
     const callAmount = game.currentBet - this.currentRoundBet;
     const potOdds = callAmount / (game.pot + callAmount);
 
+    console.log(`[AI ${this.name}] 决策中...`, {
+      handStrength,
+      callAmount,
+      currentBet: game.currentBet,
+      myBet: this.currentRoundBet,
+      pot: game.pot,
+      potOdds,
+      phase: game.currentPhase
+    });
+
+    let decision;
     switch (this.difficulty) {
       case 'easy':
-        return this.easyDecision(handStrength, callAmount, potOdds, game);
+        decision = this.easyDecision(handStrength, callAmount, potOdds, game);
+        break;
       case 'medium':
-        return this.mediumDecision(handStrength, callAmount, potOdds, game);
+        decision = this.mediumDecision(handStrength, callAmount, potOdds, game);
+        break;
       case 'hard':
-        return this.hardDecision(handStrength, callAmount, potOdds, game);
+        decision = this.hardDecision(handStrength, callAmount, potOdds, game);
+        break;
       default:
-        return this.mediumDecision(handStrength, callAmount, potOdds, game);
+        decision = this.mediumDecision(handStrength, callAmount, potOdds, game);
     }
+
+    console.log(`[AI ${this.name}] 决定:`, decision);
+    return decision;
   }
 
   /**
@@ -119,6 +136,14 @@ class AIPlayer extends Player {
    * 简单难度 - 随机决策
    */
   easyDecision(strength, callAmount, potOdds, game) {
+    // 检查是否只剩一名未弃牌玩家（包括自己）
+    const playersNotFolded = game.players.filter(p => !p.folded);
+    if (playersNotFolded.length === 1) {
+      // 只剩自己，不需要行动，游戏应该会结束
+      console.log(`[AI ${this.name}] 只剩一名玩家，不执行fold`);
+      return { type: 'check' }; // 返回check，让游戏正常结束
+    }
+
     const random = Math.random();
 
     // 30% 概率随机弃牌
@@ -150,6 +175,13 @@ class AIPlayer extends Player {
    * 中等难度 - 根据牌力决策
    */
   mediumDecision(strength, callAmount, potOdds, game) {
+    // 检查是否只剩一名未弃牌玩家（包括自己）
+    const playersNotFolded = game.players.filter(p => !p.folded);
+    if (playersNotFolded.length === 1) {
+      console.log(`[AI ${this.name}] 只剩一名玩家，check以结束游戏`);
+      return { type: 'check' };
+    }
+
     // 强牌 (>0.7)
     if (strength > 0.7) {
       if (callAmount === 0) {
@@ -194,7 +226,15 @@ class AIPlayer extends Player {
    */
   hardDecision(strength, callAmount, potOdds, game) {
     // 考虑对手数量
-    const activePlayers = game.players.filter(p => !p.folded && p.active).length;
+    const playersNotFolded = game.players.filter(p => !p.folded);
+
+    // 检查是否只剩一名未弃牌玩家（包括自己）
+    if (playersNotFolded.length === 1) {
+      console.log(`[AI ${this.name}] 只剩一名玩家，check以结束游戏`);
+      return { type: 'check' };
+    }
+
+    const activePlayers = playersNotFolded.length;
 
     // 考虑底池大小
     const potSize = game.pot;
