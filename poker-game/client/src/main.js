@@ -32,7 +32,7 @@ async function init() {
     const app = document.getElementById('app');
 
     if (auth.isAuthenticated()) {
-      socketClient.connect();
+      // Socket 将在 showMainPage 中延迟连接
       showMainPage();
     } else {
       showAuthPage();
@@ -150,18 +150,29 @@ function showMainPage() {
 
   // 使用 setTimeout 确保 DOM 完全渲染后再设置事件监听器
   setTimeout(() => {
-    updateUserInfo();
-    setupMainHandlers();
-    showPage('lobby');
+    try {
+      updateUserInfo();
+      setupMainHandlers();
+      showPage('lobby');
 
-    // 定期刷新房间列表
-    setInterval(() => {
-      if (state.currentPage === 'lobby') {
-        loadRoomList();
-      }
-    }, 5000);
+      // 延迟连接 Socket，避免页面加载时的错误
+      setTimeout(() => {
+        if (!socketClient.socket) {
+          socketClient.connect();
+        }
+      }, 500);
 
-    loadRoomList();
+      // 定期刷新房间列表
+      setInterval(() => {
+        if (state.currentPage === 'lobby') {
+          loadRoomList();
+        }
+      }, 5000);
+
+      loadRoomList();
+    } catch (error) {
+      console.error('Error in showMainPage:', error);
+    }
   }, 0);
 
   console.log('Main page rendered');
@@ -237,7 +248,7 @@ function setupAuthHandlers() {
 
     try {
       await auth.login(email, password);
-      socketClient.connect();
+      // Socket 将在 showMainPage 中延迟连接
       showMainPage();
     } catch (error) {
       console.error('登录错误:', error);
@@ -259,7 +270,7 @@ function setupAuthHandlers() {
 
     try {
       await auth.register(username, email, password, initialChips);
-      socketClient.connect();
+      // Socket 将在 showMainPage 中延迟连接
       showMainPage();
     } catch (error) {
       console.error('注册错误:', error);
@@ -428,18 +439,27 @@ function updateUserInfo() {
  * 更新统计数据
  */
 function updateStats(stats) {
+  // 提供默认值
+  const safeStats = stats || {
+    gamesPlayed: 0,
+    gamesWon: 0,
+    totalEarnings: 0
+  };
+
+  console.log('Updating stats:', safeStats);
+
   const gamesPlayedEl = document.getElementById('stat-games-played');
   const gamesWonEl = document.getElementById('stat-games-won');
   const winRateEl = document.getElementById('stat-win-rate');
   const earningsEl = document.getElementById('stat-earnings');
 
-  if (gamesPlayedEl) gamesPlayedEl.textContent = stats.gamesPlayed;
-  if (gamesWonEl) gamesWonEl.textContent = stats.gamesWon;
+  if (gamesPlayedEl) gamesPlayedEl.textContent = safeStats.gamesPlayed;
+  if (gamesWonEl) gamesWonEl.textContent = safeStats.gamesWon;
 
-  const winRate = stats.gamesPlayed > 0 ? Math.round((stats.gamesWon / stats.gamesPlayed) * 100) : 0;
+  const winRate = safeStats.gamesPlayed > 0 ? Math.round((safeStats.gamesWon / safeStats.gamesPlayed) * 100) : 0;
   if (winRateEl) winRateEl.textContent = `${winRate}%`;
 
-  if (earningsEl) earningsEl.textContent = stats.totalEarnings.toLocaleString();
+  if (earningsEl) earningsEl.textContent = safeStats.totalEarnings.toLocaleString();
 }
 
 /**

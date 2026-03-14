@@ -17,12 +17,25 @@ class SocketClient {
   connect() {
     const token = auth.getToken();
 
-    this.socket = io({
-      auth: { token },
-      transports: ['websocket']
-    });
+    if (!token) {
+      console.warn('No token found, skipping socket connection');
+      return;
+    }
 
-    this.setupEventHandlers();
+    try {
+      this.socket = io({
+        auth: { token },
+        transports: ['websocket', 'polling'],
+        reconnection: true,
+        reconnectionAttempts: 5,
+        reconnectionDelay: 1000
+      });
+
+      this.setupEventHandlers();
+      console.log('Socket client initialized');
+    } catch (error) {
+      console.error('Socket connection error:', error);
+    }
   }
 
   /**
