@@ -14,16 +14,33 @@ const state = {
   inMultiplayerGame: false
 };
 
+// 全局错误处理
+window.addEventListener('error', (event) => {
+  console.error('Global error:', event.error);
+});
+
+window.addEventListener('unhandledrejection', (event) => {
+  console.error('Unhandled promise rejection:', event.reason);
+});
+
 // 初始化应用
 async function init() {
-  setupSocketListeners();
-  const app = document.getElementById('app');
+  console.log('Initializing app...');
 
-  if (auth.isAuthenticated()) {
-    socketClient.connect();
-    showMainPage();
-  } else {
-    showAuthPage();
+  try {
+    setupSocketListeners();
+    const app = document.getElementById('app');
+
+    if (auth.isAuthenticated()) {
+      socketClient.connect();
+      showMainPage();
+    } else {
+      showAuthPage();
+    }
+
+    console.log('App initialized');
+  } catch (error) {
+    console.error('App initialization error:', error);
   }
 }
 
@@ -119,22 +136,35 @@ async function checkServerConnection() {
  * 显示主页面
  */
 function showMainPage() {
+  console.log('Showing main page...');
+
   const app = document.getElementById('app');
   const template = document.getElementById('main-template');
+
+  if (!app || !template) {
+    console.error('App or template not found!');
+    return;
+  }
+
   app.innerHTML = template.innerHTML;
 
-  updateUserInfo();
-  setupMainHandlers();
-  showPage('lobby');
+  // 使用 setTimeout 确保 DOM 完全渲染后再设置事件监听器
+  setTimeout(() => {
+    updateUserInfo();
+    setupMainHandlers();
+    showPage('lobby');
 
-  // 定期刷新房间列表
-  setInterval(() => {
-    if (state.currentPage === 'lobby') {
-      loadRoomList();
-    }
-  }, 5000);
+    // 定期刷新房间列表
+    setInterval(() => {
+      if (state.currentPage === 'lobby') {
+        loadRoomList();
+      }
+    }, 5000);
 
-  loadRoomList();
+    loadRoomList();
+  }, 0);
+
+  console.log('Main page rendered');
 }
 
 /**
@@ -243,32 +273,46 @@ function setupAuthHandlers() {
  * 设置主页面处理器
  */
 function setupMainHandlers() {
+  console.log('Setting up main handlers...');
+
   // 导航按钮
   const navBtns = document.querySelectorAll('.nav-btn');
+  console.log('Found nav buttons:', navBtns.length);
+
   navBtns.forEach(btn => {
     btn.addEventListener('click', () => {
       const page = btn.dataset.page;
+      console.log('Nav button clicked:', page);
       showPage(page);
     });
   });
 
   // 登出按钮
   const logoutBtn = document.getElementById('logout-btn');
-  logoutBtn.addEventListener('click', () => {
-    socketClient.disconnect();
-    auth.logout();
-    showAuthPage();
-  });
+  if (logoutBtn) {
+    logoutBtn.addEventListener('click', () => {
+      console.log('Logout button clicked');
+      socketClient.disconnect();
+      auth.logout();
+      showAuthPage();
+    });
+  } else {
+    console.error('Logout button not found!');
+  }
 
   // 创建房间按钮
   const createRoomBtn = document.getElementById('create-room-btn');
-  createRoomBtn.addEventListener('click', showCreateRoomDialog);
+  if (createRoomBtn) {
+    createRoomBtn.addEventListener('click', showCreateRoomDialog);
+  }
 
   // 快速匹配按钮
   const quickMatchBtn = document.getElementById('quick-match-btn');
-  quickMatchBtn.addEventListener('click', () => {
-    alert('快速匹配功能开发中...');
-  });
+  if (quickMatchBtn) {
+    quickMatchBtn.addEventListener('click', () => {
+      alert('快速匹配功能开发中...');
+    });
+  }
 
   // 单机游戏开始按钮
   const startSinglePlayerBtn = document.getElementById('start-single-player-btn');
@@ -277,6 +321,8 @@ function setupMainHandlers() {
       alert('单机游戏功能开发中，敬请期待！');
     });
   }
+
+  console.log('Main handlers setup complete');
 }
 
 /**
@@ -331,8 +377,13 @@ window.joinRoom = function(roomId, hasPassword) {
  * 显示页面
  */
 function showPage(pageName) {
+  console.log('Showing page:', pageName);
+
   const pages = document.querySelectorAll('.page');
   const navBtns = document.querySelectorAll('.nav-btn');
+
+  console.log('Found pages:', pages.length);
+  console.log('Found nav buttons:', navBtns.length);
 
   pages.forEach(page => {
     page.classList.remove('active');
