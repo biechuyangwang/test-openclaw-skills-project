@@ -1,4 +1,4 @@
-const Card = require('./Card');
+import Card from './Card.js';
 
 /**
  * 牌堆类
@@ -59,4 +59,4 @@ class Deck {
   }
 }
 
-module.exports = Deck;
+export default Deck;

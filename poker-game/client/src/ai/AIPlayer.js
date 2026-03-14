@@ -1,5 +1,5 @@
-const Player = require('../game/Player.js');
-const HandEvaluator = require('../game/HandEvaluator.js');
+import Player from '../game/Player.js';
+import HandEvaluator from '../game/HandEvaluator.js';
 
 /**
  * AI 玩家类
@@ -303,4 +303,4 @@ class AIPlayer extends Player {
   }
 }
 
-module.exports = AIPlayer;
+export default AIPlayer;

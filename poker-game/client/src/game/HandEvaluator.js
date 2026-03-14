@@ -324,4 +324,4 @@ class HandEvaluator {
   }
 }
 
-module.exports = HandEvaluator;
+export default HandEvaluator;

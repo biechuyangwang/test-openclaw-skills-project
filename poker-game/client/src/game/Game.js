@@ -1,6 +1,6 @@
-const Deck = require('./Deck');
-const Player = require('./Player');
-const HandEvaluator = require('./HandEvaluator');
+import Deck from './Deck.js';
+import Player from './Player.js';
+import HandEvaluator from './HandEvaluator.js';
 
 /**
  * 游戏控制器
@@ -395,4 +395,4 @@ class Game {
   }
 }
 
-module.exports = Game;
+export default Game;
