@@ -669,10 +669,24 @@ function showRaiseSlider() {
  */
 async function startSinglePlayerGame() {
   try {
+    console.log('开始加载游戏模块...');
+
     // 动态导入游戏模块
-    const { Game } = await import('./game/Game.js');
-    const { Player } = await import('./game/Player.js');
-    const { AIPlayer } = await import('./ai/AIPlayer.js');
+    const gameModule = await import('./game/Game.js');
+    const playerModule = await import('./game/Player.js');
+    const aiModule = await import('./ai/AIPlayer.js');
+
+    console.log('Game module:', gameModule);
+    console.log('Game module default:', gameModule.default);
+    console.log('Player module:', playerModule);
+
+    const { default: Game } = gameModule;
+    const { default: Player } = playerModule;
+    const { default: AIPlayer } = aiModule;
+
+    console.log('Game class:', typeof Game);
+    console.log('Player class:', typeof Player);
+    console.log('AIPlayer class:', typeof AIPlayer);
 
     // 获取配置
     const aiCount = parseInt(document.getElementById('ai-count').value);

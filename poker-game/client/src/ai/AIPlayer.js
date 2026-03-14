@@ -1,5 +1,5 @@
-import Player from '../game/Player.js';
-import HandEvaluator from '../game/HandEvaluator.js';
+import Player from '../game/Player';
+import HandEvaluator from '../game/HandEvaluator';
 
 /**
  * AI 玩家类

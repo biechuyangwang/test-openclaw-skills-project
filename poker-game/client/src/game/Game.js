@@ -1,6 +1,6 @@
-import Deck from './Deck.js';
-import Player from './Player.js';
-import HandEvaluator from './HandEvaluator.js';
+import Deck from './Deck';
+import Player from './Player';
+import HandEvaluator from './HandEvaluator';
 
 /**
  * 游戏控制器
